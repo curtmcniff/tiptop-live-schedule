@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Live Schedule</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#C72E27">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Live Schedule">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="hdr">
+  <div class="hdr-row">
+    <div class="hdr-text">
+      <h1>Live Schedule</h1>
+      <div id="updated" class="updated">Loading…</div>
+    </div>
+    <button id="refresh" type="button" aria-label="Refresh data" title="Refresh">&#8635;</button>
+  </div>
+</header>
+<div id="banners">
+  <div id="stale" class="banner amber" hidden></div>
+  <div id="offline" class="banner grey" hidden>Offline — showing saved copy</div>
+</div>
+<nav id="tabs" class="tabs" aria-label="Week" hidden></nav>
+<div id="searchwrap" class="searchwrap" hidden>
+  <input id="search" type="search" placeholder="Search grower, complex, producer, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+  <div id="matches" class="matches" hidden></div>
+</div>
+<main id="main"></main>
+<script src="app.js"></script>
+</body>
+</html>
