@@ -61,6 +61,8 @@ button:disabled{opacity:.45;cursor:not-allowed}
   <div class="training" id="training"></div>
 </details>
 
+<div id="resumeMsg" class="msg hidden"></div>
+
 <div class="card">
   <h2 style="margin-top:0" data-t="sessionH"></h2>
   <label for="trainer" data-t="trainerL"></label>
@@ -515,7 +517,8 @@ clear:"Clear signature",add:"Add signer",queueH:"Signed on this form",queueEmpty
 send:"Create PDF",share:"Share PDF (text or email)",open:"Open PDF",ready:"PDF ready. Tap Share PDF, then choose Messages or Mail and send to Tip Top Live Operations.",newForm:"Start new form",remove:"Remove",
 eTrainer:"Enter the trainer name first.",eCrew:"Enter the crew first.",eName:"Enter the name.",eSig:"Sign in the box.",eAck:"Check the acknowledgment box.",
 making:"Creating PDF…",shared:"PDF created. Send it by text or email to Tip Top Live Operations.",saved:"PDF saved to this phone. Send it by text or email to Tip Top Live Operations.",
-ePdf:"Could not create the PDF. Signatures are kept on this form; try again.",confirmNew:"Clear this form and all signatures on it? Make sure the PDF was sent first."},
+ePdf:"Could not create the PDF. Signatures are kept on this form; try again.",confirmNew:"Clear this form and all signatures on it? Make sure the PDF was sent first.",
+resume:"This form still has {n} signature(s) from an earlier session that were not shared. Create and send the PDF, or tap Start new form."},
 es:{title:"Capacitación del Personal de Captura: Aves Sueltas y Seguridad con Vehículos",meta:"Fecha de capacitación: 16 de noviembre de 2026 · Aplica a todo el personal de captura y los jefes de cuadrilla",
 readTraining:"Lea la capacitación",sessionH:"Sesión de capacitación",trainerL:"Nombre del instructor",crewL:"Cuadrilla",signH:"Firme la capacitación",nameL:"Nombre",
 sigL:"Firma (firme con el dedo)",sigHint:"Firme aquí",
@@ -524,7 +527,8 @@ clear:"Borrar firma",add:"Agregar firmante",queueH:"Firmas en este formulario",q
 send:"Crear PDF",share:"Compartir PDF (mensaje o correo)",open:"Abrir PDF",ready:"PDF listo. Toque Compartir PDF, luego elija Mensajes o Correo y envíelo a Operaciones de Aves Vivas de Tip Top.",newForm:"Nuevo formulario",remove:"Quitar",
 eTrainer:"Primero escriba el nombre del instructor.",eCrew:"Primero escriba la cuadrilla.",eName:"Escriba el nombre.",eSig:"Firme en el recuadro.",eAck:"Marque la casilla de reconocimiento.",
 making:"Creando PDF…",shared:"PDF creado. Envíelo por mensaje de texto o correo a Operaciones de Aves Vivas de Tip Top.",saved:"PDF guardado en este teléfono. Envíelo por mensaje de texto o correo a Operaciones de Aves Vivas de Tip Top.",
-ePdf:"No se pudo crear el PDF. Las firmas se conservan en este formulario; intente de nuevo.",confirmNew:"¿Borrar este formulario y todas sus firmas? Asegúrese de haber enviado el PDF primero."}};
+ePdf:"No se pudo crear el PDF. Las firmas se conservan en este formulario; intente de nuevo.",confirmNew:"¿Borrar este formulario y todas sus firmas? Asegúrese de haber enviado el PDF primero.",
+resume:"Este formulario todavía tiene {n} firma(s) de una sesión anterior que no se compartieron. Cree y envíe el PDF, o toque Nuevo formulario."}};
 
 var CONTENT={
 en:[["Purpose",["p","Strays are exposed to dangers outside the house and can be injured, die, or be struck by vehicles. Every crew member is responsible for finding strays and keeping them out of harm’s way, from the first load to the moment the crew leaves the farm."]],
@@ -540,13 +544,13 @@ es:[["Propósito",["p","Las aves sueltas están expuestas a peligros fuera del g
 ["Evite que haya aves debajo o delante de los vehículos",["p","Ninguna ave debe estar debajo de un camión, remolque o equipo, ni en la trayectoria de ningún vehículo en la granja."],["ol","Antes de mover cualquier vehículo o montacargas, camine por todo su alrededor y mire por debajo, detrás y enfrente.","Revise primero debajo de los camiones y remolques. Las aves sueltas buscan sombra y refugio.","El conductor no se mueve hasta que un miembro de la cuadrilla confirme que el área está despejada.","Use un señalero al dar reversa.","Si hay un ave en la trayectoria de un vehículo, deténgase. Retire el ave antes de avanzar. Nunca maneje alrededor de ella ni sobre ella.","Revise de nuevo debajo de cada camión y remolque antes de salir de la granja."]],
 ["Responsabilidades del jefe de cuadrilla",["ul","Informe a la cuadrilla sobre esta capacitación antes de cada captura.","Confirme que el recorrido final y la revisión debajo de los camiones estén completos antes de que la cuadrilla salga.","Reporte el mismo día a Operaciones de Aves Vivas de Tip Top cualquier ave lesionada o muerta por un vehículo, y cualquier ave suelta que no se haya recuperado."]]]};
 
-var lang="en", queue=[];
+var lang="en", queue=[], sent=false, resumed=0;
 function $(id){return document.getElementById(id)}
 function t(k){return T[lang][k]}
 
 // persistence (survives reloads on this phone until "Start new form")
-function save(){try{localStorage.setItem(STORE,JSON.stringify({trainer:$("trainer").value,crew:$("crew").value,queue:queue,lang:lang}))}catch(e){}}
-function load(){try{var s=JSON.parse(localStorage.getItem(STORE)||"null");if(s){$("trainer").value=s.trainer||"";$("crew").value=s.crew||"";queue=Array.isArray(s.queue)?s.queue:[];if(s.lang==="es")lang="es";}}catch(e){}}
+function save(){try{localStorage.setItem(STORE,JSON.stringify({trainer:$("trainer").value,crew:$("crew").value,queue:queue,lang:lang,sent:sent}))}catch(e){}}
+function load(){try{var s=JSON.parse(localStorage.getItem(STORE)||"null");if(s){if(s.lang==="es")lang="es";if(s.sent){save();}else{$("trainer").value=s.trainer||"";$("crew").value=s.crew||"";queue=Array.isArray(s.queue)?s.queue:[];resumed=queue.length;}}}catch(e){}}
 $("trainer").addEventListener("input",save);$("crew").addEventListener("input",save);
 
 function renderTraining(){
@@ -562,6 +566,7 @@ function applyLang(){
   document.documentElement.lang=lang;
   document.querySelectorAll("[data-t]").forEach(function(e){var v=t(e.getAttribute("data-t"));if(typeof v==="string")e.textContent=v;});
   $("bEN").classList.toggle("on",lang==="en");$("bES").classList.toggle("on",lang==="es");
+  var rm=$("resumeMsg");rm.textContent=t("resume").replace("{n}",resumed);rm.classList.toggle("hidden",!resumed);
   renderTraining();renderQueue();
 }
 $("bEN").onclick=function(){lang="en";applyLang();save()};
@@ -594,7 +599,7 @@ $("addSigner").onclick=function(){
   if(!inked){err.textContent=t("eSig");return}
   if(!$("ackBox").checked){err.textContent=t("eAck");return}
   err.textContent="";
-  queue.push({name:n,signature:sigImage(),lang:lang,signedAt:new Date().toISOString()});
+  queue.push({name:n,signature:sigImage(),lang:lang,signedAt:new Date().toISOString()});sent=false;
   $("name").value="";$("ackBox").checked=false;clearPad();$("doneMsg").classList.add("hidden");$("sharePanel").classList.add("hidden");lastFile=null;
   save();renderQueue();$("name").focus({preventScroll:true});
 };
@@ -606,7 +611,7 @@ function renderQueue(){
     var im=document.createElement("img");im.src=s.signature;im.alt="";
     var who=document.createElement("div");who.className="who";who.textContent=(i+1)+". "+s.name;
     var sm=document.createElement("small");sm.textContent=" · "+fmt(s.signedAt);who.appendChild(sm);
-    var rm=document.createElement("button");rm.textContent=t("remove");rm.onclick=function(){queue.splice(i,1);save();renderQueue()};
+    var rm=document.createElement("button");rm.textContent=t("remove");rm.onclick=function(){queue.splice(i,1);sent=false;save();renderQueue()};
     row.appendChild(im);row.appendChild(who);row.appendChild(rm);q.appendChild(row);});
   $("qCount").textContent=queue.length;
   $("qEmpty").classList.toggle("hidden",queue.length>0);
@@ -710,7 +715,7 @@ $("shareBtn").onclick=function(){
   if(!lastFile)return;
   var crew=$("crew").value.trim();
   navigator.share({files:[lastFile],title:lastFile.name,text:"Stray training sign-off – "+crew})
-    .then(function(){var m=$("doneMsg");m.textContent=t("shared");m.classList.remove("hidden")})
+    .then(function(){sent=true;save();resumed=0;$("resumeMsg").classList.add("hidden");var m=$("doneMsg");m.textContent=t("shared");m.classList.remove("hidden")})
     .catch(function(e){if(!e||e.name!=="AbortError"){$("pdfErr").textContent=t("ePdf")}});
 };
 $("openBtn").onclick=function(){if(lastUrl)window.open(lastUrl,"_blank")};
@@ -718,7 +723,7 @@ $("openBtn").onclick=function(){if(lastUrl)window.open(lastUrl,"_blank")};
 $("newForm").onclick=function(){
   if(queue.length&&!confirm(t("confirmNew")))return;
   queue=[];$("trainer").value="";$("crew").value="";$("name").value="";$("ackBox").checked=false;clearPad();
-  $("doneMsg").classList.add("hidden");$("sharePanel").classList.add("hidden");lastFile=null;save();renderQueue();
+  $("doneMsg").classList.add("hidden");$("sharePanel").classList.add("hidden");lastFile=null;sent=false;resumed=0;$("resumeMsg").classList.add("hidden");save();renderQueue();
 };
 
 load();applyLang();sizePad();
