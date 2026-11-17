@@ -635,8 +635,38 @@ async function buildPdf(){
   doc.setTextColor(30);doc.setFontSize(10);
   [["Training version / Versión: ",TRAINING_DATE],["Session date / Fecha de sesión: ",fmt(now.toISOString())],["Trainer / Instructor: ",trainer],["Crew / Cuadrilla: ",crew],["Signers / Firmantes: ",String(queue.length)]]
     .forEach(function(r){doc.setFont("helvetica","bold");doc.text(r[0],M,y);var x=M+doc.getTextWidth(r[0])+3;doc.setFont("helvetica","normal");doc.text(r[1],x,y);y+=14;});
-  y+=6;doc.setFontSize(9.5);
-  [T.en.ackText,T.es.ackText].forEach(function(s){var lines=doc.splitTextToSize(s,W-2*M);doc.text(lines,M,y);y+=lines.length*12+6;});
+  y+=10;
+  // the training itself, English then Spanish, printed above the acknowledgment and the signatures
+  var CW=W-2*M,BOT=H-70;
+  function need(h){if(y+h>BOT){footer();doc.addPage();y=62;}}
+  function pdfText(s){return String(s).replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/…/g,"...").replace(/[–—]/g,"-");}
+  function flow(s,x,w,size,style,lead,first){
+    doc.setFont("helvetica",style);doc.setFontSize(size);
+    doc.splitTextToSize(pdfText(s),w).forEach(function(ln,k){need(lead);if(k===0&&first)first();doc.setFont("helvetica",style);doc.setFontSize(size);doc.text(ln,x,y);y+=lead;});}
+  function trainingBlock(L){
+    need(60);
+    doc.setTextColor(RED[0],RED[1],RED[2]);flow(T[L].title,M,CW,12,"bold",15);
+    doc.setDrawColor(RED[0],RED[1],RED[2]);doc.setLineWidth(0.8);doc.line(M,y-8,W-M,y-8);y+=4;
+    CONTENT[L].forEach(function(sec){
+      need(40);y+=3;
+      doc.setTextColor(RED[0],RED[1],RED[2]);flow(sec[0],M,CW,10.5,"bold",14);
+      doc.setTextColor(30);
+      for(var i=1;i<sec.length;i++){var b=sec[i];
+        if(b[0]==="p"){flow(b[1],M,CW,9.5,"normal",12);y+=3;}
+        else{b.slice(1).forEach(function(item,k){
+          flow(item,M+22,CW-22,9.5,"normal",12,function(){
+            if(b[0]==="ol"){doc.setFont("helvetica","bold");doc.setFontSize(9.5);doc.text((k+1)+".",M+8,y);}
+            else{doc.setFillColor(30,30,30);doc.circle(M+12,y-3.2,1.4,"F");}});
+          y+=2;});y+=2;}}
+    });
+  }
+  trainingBlock("en");y+=12;trainingBlock("es");y+=12;
+  doc.setFont("helvetica","normal");doc.setFontSize(9.5);
+  var ack=[T.en.ackText,T.es.ackText].map(function(s){return doc.splitTextToSize(pdfText(s),CW)});
+  need(18+(ack[0].length+ack[1].length)*12+12+4+20+58); // heading + acknowledgment + table head + first signature stay together
+  doc.setTextColor(RED[0],RED[1],RED[2]);flow("Acknowledgment and signatures / Reconocimiento y firmas",M,CW,11,"bold",18);
+  doc.setTextColor(30);doc.setFont("helvetica","normal");doc.setFontSize(9.5);
+  ack.forEach(function(lines){doc.text(lines,M,y);y+=lines.length*12+6;});
   y=tableHead(y+4);
   var rowH=58;
   for(var i=0;i<queue.length;i++){
