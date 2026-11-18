@@ -507,7 +507,7 @@ var TRAINING_DATE="11/16/2026", STORE="tiptop_welfare_signoff_v1";
 document.getElementById("logo").src=LOGO;
 
 var T={
-en:{title:"Catcher Training: Poultry Welfare Policy",meta:"Training date: 11/16/2026 · Applies to all catching crew members and crew bosses",
+en:{title:"Catcher Training: Poultry Welfare Policy",meta:"Form version: 11/16/2026 · Applies to all catching crew members and crew bosses",
 readTraining:"Read the training",sessionH:"Training session",trainerL:"Trainer name",crewL:"Crew",signH:"Sign the training",nameL:"Name",
 sigL:"Signature (sign with your finger)",sigHint:"Sign here",
 ackText:"I have received this training on the Poultry Welfare Policy. I understand the above requirements and will comply with this policy.",
@@ -516,7 +516,7 @@ send:"Create PDF",share:"Share PDF (text or email)",open:"Open PDF",ready:"PDF r
 eTrainer:"Enter the trainer name first.",eCrew:"Enter the crew first.",eName:"Enter the name.",eSig:"Sign in the box.",eAck:"Check the acknowledgment box.",
 making:"Creating PDF…",shared:"PDF created. Send it by text or email to Tip Top Live Operations.",saved:"PDF saved to this phone. Send it by text or email to Tip Top Live Operations.",
 ePdf:"Could not create the PDF. Signatures are kept on this form; try again.",confirmNew:"Clear this form and all signatures on it? Make sure the PDF was sent first."},
-es:{title:"Capacitación del Personal de Captura: Política de Bienestar Avícola",meta:"Fecha de capacitación: 16 de noviembre de 2026 · Aplica a todo el personal de captura y los jefes de cuadrilla",
+es:{title:"Capacitación del Personal de Captura: Política de Bienestar Avícola",meta:"Versión del formulario: 16 de noviembre de 2026 · Aplica a todo el personal de captura y los jefes de cuadrilla",
 readTraining:"Lea la capacitación",sessionH:"Sesión de capacitación",trainerL:"Nombre del instructor",crewL:"Cuadrilla",signH:"Firme la capacitación",nameL:"Nombre",
 sigL:"Firma (firme con el dedo)",sigHint:"Firme aquí",
 ackText:"He recibido esta capacitación sobre la Política de Bienestar Avícola. Comprendo los requisitos anteriores y cumpliré con esta política.",
@@ -623,7 +623,7 @@ async function buildPdf(){
   doc.text("Training Sign-off: Poultry Welfare Policy",M,y);y+=16;
   doc.setFontSize(11);doc.text("Firmas de capacitación: Política de Bienestar Avícola",M,y);y+=20;
   doc.setTextColor(30);doc.setFontSize(10);
-  [["Training version / Versión: ",TRAINING_DATE],["Session date / Fecha de sesión: ",fmt(now.toISOString())],["Trainer / Instructor: ",trainer],["Crew / Cuadrilla: ",crew],["Signers / Firmantes: ",String(queue.length)]]
+  [["Form version / Versión del formulario: ",TRAINING_DATE],["Training date / Fecha de capacitación: ",fmt(now.toISOString())],["Trainer / Instructor: ",trainer],["Crew / Cuadrilla: ",crew],["Signers / Firmantes: ",String(queue.length)]]
     .forEach(function(r){doc.setFont("helvetica","bold");doc.text(r[0],M,y);var x=M+doc.getTextWidth(r[0])+3;doc.setFont("helvetica","normal");doc.text(r[1],x,y);y+=14;});
   y+=10;
   // the training itself, English then Spanish, printed above the acknowledgment and the signatures
