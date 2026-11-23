@@ -1,9 +1,14 @@
-// Bump VERSION on any shell change (index.html, app.js, style.css, manifest, icons).
-const VERSION = 'v4';
+// Bump VERSION on any shell change (index.html, app.js, style.css, manifest, icons), and change
+// index.html's "app.js?vN" and "style.css?vN" to the same VERSION in the same change.
+// Why the ?vN: the page itself comes from the network when online, but app.js / style.css are
+// served from the phone's saved copy. Without a version in their URL a new page could run with the
+// previous version's script (2026-11-23: the new filter dropdowns came up empty on an iPhone).
+// With it, a new page asks for app.js?v5, finds nothing saved under that name and fetches it.
+const VERSION = 'v5';
 const SHELL_CACHE = 'shell-' + VERSION;
 const DATA_CACHE = 'data-live'; // separate from shell so shell bumps never wipe the saved schedule
 const SHELL = [
-  './', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
+  './', 'index.html', 'app.js?' + VERSION, 'style.css?' + VERSION, 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 
