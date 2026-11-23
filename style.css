@@ -77,13 +77,30 @@ h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
 .banner.grey { background: var(--grey-bg); color: var(--grey-text); }
 .banner[hidden], [hidden] { display: none !important; }
 
+/* seven week tabs: on a phone about four show and the strip (.strip, built by app.js) scrolls
+   sideways; a faded arrow on either side says there are more weeks that way (tap it to scroll).
+   On a wide screen they all fit and the arrows stay hidden. */
 .tabs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
-  padding: 8px 10px; background: var(--bg);
+  padding: 8px 0; background: var(--bg);
   position: sticky; top: var(--hdr-h, 64px); z-index: 15;
 }
+.tabs .strip {
+  display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity; scroll-padding-inline: 10px; scrollbar-width: none;
+  padding: 0 10px;
+}
+.tabs .strip::-webkit-scrollbar { display: none; }
+.tabs .strip::after { content: ''; flex: 0 0 4px; }   /* end padding: scrolled fully right, the last tab clears the edge */
+.tabs .more {
+  position: absolute; top: 0; bottom: 0; width: 44px; z-index: 1;
+  display: flex; align-items: center; border: 0; padding: 0 6px; cursor: pointer;
+  font: inherit; font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--text);
+}
+.tabs .more.l { left: 0; justify-content: flex-start; background: linear-gradient(to right, var(--bg) 45%, rgba(0, 0, 0, 0)); }
+.tabs .more.r { right: 0; justify-content: flex-end; background: linear-gradient(to left, var(--bg) 45%, rgba(0, 0, 0, 0)); }
 .tab {
-  min-height: 52px; padding: 4px 2px; border-radius: 10px;
+  flex: 0 0 auto; min-width: 72px; scroll-snap-align: start;   /* each tab as wide as its dates */
+  min-height: 52px; padding: 4px 8px; border-radius: 10px;
   border: 2px solid var(--line); background: var(--surface); color: var(--text);
   font: inherit; font-size: 0.9rem; line-height: 1.15; cursor: pointer;
 }
@@ -120,6 +137,8 @@ h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
 .filters select.on { border-color: var(--accent); font-weight: 700; }
 .matches .fnames { display: block; color: var(--text); overflow-wrap: anywhere; }
 .tab i { display: block; font-style: normal; font-size: 0.78rem; font-weight: 700; }
+.tab b, .tab span, .tab i { white-space: nowrap; }
+@media (min-width: 640px) { .tab { flex: 1 1 auto; } .tabs .strip::after { display: none; } }
 
 main { padding: 0 10px 40px; }
 .msg { margin: 24px 4px; padding: 16px; background: var(--surface); border: 2px solid var(--line); border-radius: 10px; font-size: 1.05rem; }

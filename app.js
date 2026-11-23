@@ -98,7 +98,7 @@
       return !v || f.key === skip || poValues(po, f.key).indexOf(v) !== -1;
     });
   }
-  // each list offers only values that still have POs under the other two choices (all four weeks)
+  // each list offers only values that still have POs under the other two choices (all weeks)
   function renderFilters() {
     var pos = state.data.pos;
     FILTERS.forEach(function (f) {
@@ -380,11 +380,42 @@
     syncSticky();
   }
 
+  // The week tabs sit in a strip that scrolls sideways on a phone (seven weeks since 2026-11-23),
+  // with a faded arrow at either end while there are more weeks that way.
+  function tabStrip() {
+    var nav = $('tabs'), strip = nav.querySelector('.strip');
+    if (strip) return strip;
+    nav.removeAttribute('role');
+    strip = el('div', 'strip');
+    strip.setAttribute('role', 'tablist');
+    nav.appendChild(strip);
+    [['l', '‹', 'Earlier weeks', -1], ['r', '›', 'Later weeks', 1]].forEach(function (a) {
+      var m = el('button', 'more ' + a[0], a[1]);
+      m.type = 'button'; m.hidden = true;
+      m.setAttribute('aria-label', a[2]);
+      m.addEventListener('click', function () {
+        var by = a[3] * Math.max(120, strip.clientWidth * 0.7);
+        if (strip.scrollBy) strip.scrollBy({ left: by, behavior: 'smooth' }); else strip.scrollLeft += by;
+      });
+      nav.appendChild(m);
+    });
+    strip.addEventListener('scroll', moreArrows, { passive: true });
+    window.addEventListener('resize', moreArrows);
+    return strip;
+  }
+  function moreArrows() {
+    var nav = $('tabs'), strip = nav.querySelector('.strip');
+    if (!strip) return;
+    nav.querySelector('.more.l').hidden = strip.scrollLeft <= 2;
+    nav.querySelector('.more.r').hidden = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2;
+  }
+
   function renderTabs(on) {
-    var nav = $('tabs');
+    var nav = tabStrip();
+    var keep = nav.scrollLeft;   // stay where the user left the strip
     nav.textContent = '';
-    nav.setAttribute('role', 'tablist');
-    var names = { previous: 'Last wk', current: 'This wk', next: 'Next wk', after: 'Wk after' };
+    var names = { previous: 'Last wk', current: 'This wk', next: 'Next wk', after: 'Wk after', plus3: 'In 3 wks', plus4: 'In 4 wks', plus5: 'In 5 wks' };
+    var picked = null;
     state.data.weeks.forEach(function (w, i) {
       var b = el('button', 'tab');
       b.type = 'button';
@@ -405,7 +436,17 @@
         window.scrollTo(0, 0);
       });
       nav.appendChild(b);
+      if (i === state.weekIdx && !state.query.trim()) picked = b;
     });
+    nav.scrollLeft = keep;
+    // keep the chosen week's tab in view and clear of the arrows (not scrollIntoView: that can
+    // also move the page)
+    if (picked) {
+      var left = picked.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft, right = left + picked.offsetWidth;
+      if (left - 46 < nav.scrollLeft) nav.scrollLeft = Math.max(0, left - 46);
+      else if (right + 46 > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = right + 46 - nav.clientWidth;
+    }
+    moreArrows();
   }
 
   function shortRange(w) {
