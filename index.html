@@ -30,7 +30,12 @@
 </div>
 <nav id="tabs" class="tabs" aria-label="Week" hidden></nav>
 <div id="searchwrap" class="searchwrap" hidden>
-  <input id="search" type="search" placeholder="Search grower, complex, producer, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+  <input id="search" type="search" placeholder="Search grower, complex, catcher, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+  <div class="filters">
+    <label>Producer<select id="f-producer" aria-label="Producer filter"></select></label>
+    <label>Complex<select id="f-complex" aria-label="Complex filter"></select></label>
+    <label>Catcher<select id="f-catcher" aria-label="Catcher filter"></select></label>
+  </div>
   <div id="matches" class="matches" hidden></div>
 </div>
 <main id="main"></main>

@@ -1,5 +1,5 @@
 // Bump VERSION on any shell change (index.html, app.js, style.css, manifest, icons).
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = 'shell-' + VERSION;
 const DATA_CACHE = 'data-live'; // separate from shell so shell bumps never wipe the saved schedule
 const SHELL = [

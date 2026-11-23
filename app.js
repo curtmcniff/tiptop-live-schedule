@@ -6,7 +6,7 @@
   var REFETCH_MS = 10 * 60 * 1000;
 
   var $ = function (id) { return document.getElementById(id); };
-  var state = { data: null, offline: false, weekIdx: 0, query: '', lastFetch: 0, firstRender: true, loading: false };
+  var state = { data: null, offline: false, weekIdx: 0, query: '', lastFetch: 0, firstRender: true, loading: false, filters: null };
 
   // ---------- helpers ----------
   function el(tag, cls, text) {
@@ -58,6 +58,96 @@
   }
   function hasFlag(po, code) {
     return (po.flags || []).some(function (f) { return f && f.code === code; });
+  }
+  // "8 POs (2 draft)" - same total as the week tab shows
+  function countLabel(list) {
+    var drafts = list.filter(function (p) { return p.draft; }).length, n = list.length;
+    return n + (n === 1 ? ' PO' : ' POs') + (drafts ? ' (' + drafts + ' draft)' : '');
+  }
+
+  // ---------- filters (producer / complex / catcher) ----------
+  // Kept per phone in localStorage, so a crew lead's or a complex's choice is there next time.
+  // They apply on top of the week tabs and the search box.
+  var FILTER_KEY = 'ttls.filters';
+  var NONE = '__none__'; // catcher filter: POs with no catcher assigned yet
+  var FILTERS = [
+    { key: 'producer', id: 'f-producer' },
+    { key: 'complex', id: 'f-complex' },
+    { key: 'catcher', id: 'f-catcher' }
+  ];
+  function loadFilters() {
+    var f = null;
+    try { f = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch (e) { f = null; }
+    f = f || {};
+    return { producer: f.producer || '', complex: f.complex || '', catcher: f.catcher || '' };
+  }
+  function saveFilters() {
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(state.filters)); } catch (e) { /* private mode */ }
+  }
+  function filtersOn() {
+    return FILTERS.some(function (f) { return !!state.filters[f.key]; });
+  }
+  function poValues(po, key) {
+    if (key === 'catcher') return po.crew && po.crew.length ? po.crew : [NONE];
+    return po[key] ? [po[key]] : [];
+  }
+  // true when the PO passes every chosen filter; `skip` leaves one out (to list that filter's own choices)
+  function passes(po, skip) {
+    return FILTERS.every(function (f) {
+      var v = state.filters[f.key];
+      return !v || f.key === skip || poValues(po, f.key).indexOf(v) !== -1;
+    });
+  }
+  // each list offers only values that still have POs under the other two choices (all four weeks)
+  function renderFilters() {
+    var pos = state.data.pos;
+    FILTERS.forEach(function (f) {
+      var sel = $(f.id), cur = state.filters[f.key], seen = {}, names = [];
+      pos.forEach(function (po) {
+        if (!passes(po, f.key)) return;
+        poValues(po, f.key).forEach(function (v) {
+          if (!seen[v]) { seen[v] = true; names.push(v); }
+        });
+      });
+      if (cur && !seen[cur]) names.push(cur); // a saved choice with no POs right now stays visible
+      names.sort(function (a, b) { return a === NONE ? 1 : b === NONE ? -1 : cmp(a, b); });
+      sel.textContent = '';
+      var all = el('option', null, 'All');
+      all.value = '';
+      sel.appendChild(all);
+      names.forEach(function (v) {
+        var o = el('option', null, v === NONE ? 'No catcher yet' : v);
+        o.value = v;
+        sel.appendChild(o);
+      });
+      sel.value = cur;
+      sel.classList.toggle('on', !!cur);
+    });
+  }
+  function setMatches(text, on) {
+    var m = $('matches');
+    m.textContent = '';
+    if (!text) { m.hidden = true; return; }
+    m.hidden = false;
+    var span = el('span');
+    if (on) {
+      // full names, since a narrow phone cuts them off inside the dropdowns
+      var names = FILTERS.map(function (f) { return state.filters[f.key]; }).filter(Boolean)
+        .map(function (v) { return v === NONE ? 'No catcher yet' : v; });
+      span.appendChild(el('b', 'fnames', names.join(' · ')));
+    }
+    span.appendChild(document.createTextNode(text));
+    m.appendChild(span);
+    if (on) {
+      var b = el('button', 'clearf', 'Clear filters');
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        state.filters = { producer: '', complex: '', catcher: '' };
+        saveFilters();
+        render();
+      });
+      m.appendChild(b);
+    }
   }
 
   // ---------- data loading ----------
@@ -195,25 +285,25 @@
 
     $('tabs').hidden = false;
     $('searchwrap').hidden = false;
-    renderTabs();
+    var on = filtersOn();
+    renderTabs(on);
+    renderFilters();
 
     var q = state.query.trim().toLowerCase();
-    var matches = $('matches');
     var list;
     if (q) {
       list = d.pos.filter(function (po) {
-        return [po.grower, po.complex, po.producer, po.id].some(function (v) {
+        return passes(po) && [po.grower, po.complex, po.producer, po.id].concat(po.crew || []).some(function (v) {
           return v && String(v).toLowerCase().indexOf(q) !== -1;
         });
       });
-      matches.hidden = false;
-      matches.textContent = list.length + (list.length === 1 ? ' match' : ' matches');
-      renderDays(main, list, null, q);
+      setMatches(list.length + (list.length === 1 ? ' match' : ' matches') + (on ? ' (filtered)' : ''), on);
+      renderDays(main, list, null, q, on);
     } else {
-      matches.hidden = true;
       var w = d.weeks[state.weekIdx];
-      list = w ? d.pos.filter(function (po) { return po.kill >= w.start && po.kill <= w.end; }) : [];
-      renderDays(main, list, w, '');
+      list = w ? d.pos.filter(function (po) { return po.kill >= w.start && po.kill <= w.end && passes(po); }) : [];
+      setMatches(on ? countLabel(list) + ' this week' : '', on);
+      renderDays(main, list, w, '', on);
     }
     if (state.enc) {
       var forget = el('button', 'forget', 'Remove access from this phone');
@@ -290,7 +380,7 @@
     syncSticky();
   }
 
-  function renderTabs() {
+  function renderTabs(on) {
     var nav = $('tabs');
     nav.textContent = '';
     nav.setAttribute('role', 'tablist');
@@ -302,6 +392,11 @@
       b.setAttribute('aria-selected', String(i === state.weekIdx && !state.query.trim()));
       b.appendChild(el('b', null, names[w.kind] || 'Week'));
       b.appendChild(el('span', null, shortRange(w)));
+      if (on) {
+        // with a filter on, each tab shows how many of its POs match, so empty weeks are obvious
+        var n = state.data.pos.filter(function (po) { return po.kill >= w.start && po.kill <= w.end && passes(po); }).length;
+        b.appendChild(el('i', null, n + (n === 1 ? ' PO' : ' POs')));
+      }
       b.addEventListener('click', function () {
         state.weekIdx = i;
         $('search').value = '';
@@ -322,11 +417,11 @@
     return s;
   }
 
-  function renderDays(main, list, week, q) {
+  function renderDays(main, list, week, q, filtered) {
     var byDay = {};
     list.forEach(function (po) { (byDay[po.kill] = byDay[po.kill] || []).push(po); });
     var days = [];
-    if (week) {
+    if (week && !filtered) {
       var d = parseDate(week.start), end = parseDate(week.end);
       while (d && end && d <= end) {
         var k = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -337,7 +432,7 @@
       days = Object.keys(byDay).sort();
     }
     if (!days.length) {
-      main.appendChild(el('div', 'msg', q ? 'No matches.' : 'No POs for this week.'));
+      main.appendChild(el('div', 'msg', q ? 'No matches.' : filtered ? 'No POs this week match the filters.' : 'No POs for this week.'));
       return;
     }
     var today = etToday();
@@ -529,6 +624,14 @@
   $('search').addEventListener('input', function (e) {
     state.query = e.target.value;
     render();
+  });
+  state.filters = loadFilters();
+  FILTERS.forEach(function (f) {
+    $(f.id).addEventListener('change', function (e) {
+      state.filters[f.key] = e.target.value;
+      saveFilters();
+      render();
+    });
   });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible' && Date.now() - state.lastFetch > REFETCH_MS) load(false);
