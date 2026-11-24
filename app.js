@@ -794,6 +794,7 @@
     body.appendChild(el('div', 'sec-title', 'Grower'));
     var gp = digits(po.growerPhone);
     body.appendChild(contactRow(dash(po.grower), null, gp, gp, gp));
+    body.appendChild(addressRow(po.address, po.addressOk));
 
     if (po.crew && po.crew.length) {
       body.appendChild(el('div', 'sec-title', po.crew.length > 1 ? 'Catchers' : 'Catcher'));
@@ -837,6 +838,29 @@
       });
     }
     return body;
+  }
+
+  // the grower's farm address (added 2026-11-24); Map opens driving directions in the phone's maps
+  // app: Apple Maps on an iPhone, Google Maps elsewhere. Only for a complete address.
+  function addressRow(addr, ok) {
+    var r = el('div', 'contact addr');
+    var who = el('div', 'who');
+    who.appendChild(document.createTextNode(addr || 'No address on file'));
+    if (addr && !ok) who.appendChild(el('small', null, 'Incomplete address in Power Apps'));
+    r.appendChild(who);
+    if (addr && ok) {
+      var ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      var a = el('a', 'btn map', 'Map');
+      a.href = ios ? 'https://maps.apple.com/?daddr=' + encodeURIComponent(addr)
+        : 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.setAttribute('aria-label', 'Directions to ' + addr);
+      var b = el('div', 'btns');
+      b.appendChild(a);
+      r.appendChild(b);
+    }
+    return r;
   }
 
   function contactRow(name, title, callNum, textNum, shown, email) {
