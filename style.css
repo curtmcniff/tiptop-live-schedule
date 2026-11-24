@@ -166,6 +166,9 @@ main { padding: 0 10px 40px; }
 }
 .day-hdr.today { background: var(--today); border-bottom-color: var(--today-line); box-shadow: inset 6px 0 0 var(--today-line); }
 .day-title { font-weight: 700; font-size: 1.1rem; }
+/* tap the day title to open / close the day (days start closed, Curt 2026-11-24) */
+.day-open { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.day-chev { color: var(--muted); }
 .day-sum { font-size: 0.95rem; color: var(--muted); }
 .day-toggle {
   min-height: 44px; padding: 0 12px; border-radius: 8px; border: 2px solid var(--line);
@@ -290,6 +293,10 @@ a.btn:active { opacity: 0.8; }
 .t-fc.prev { background: var(--amber-bg); color: var(--amber-text); }
 .t-none { margin-top: 6px; color: var(--muted); }
 .t-row { display: flex; gap: 12px; margin-top: 8px; align-items: flex-start; }
+.tarp-head { display: flex; align-items: baseline; gap: 8px; width: 100%; min-height: 44px; margin: 14px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.tarp-head-t { font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.tarp-head-s { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.tarp-chev { flex: 0 0 auto; color: var(--muted); font-size: 1rem; }
 .tdiag { flex: 0 0 auto; }
 .tp-cab > * { fill: var(--muted); fill-opacity: .18; stroke: var(--muted); stroke-opacity: .7; stroke-width: 1.2; }
 .tp-cab .tp-cab-glass { fill: none; stroke-width: 2; }

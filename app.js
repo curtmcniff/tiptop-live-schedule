@@ -687,19 +687,25 @@
       return;
     }
     var today = etToday();
-    days.forEach(function (day) { main.appendChild(buildDay(day, byDay[day] || [], day === today)); });
+    // days start collapsed (Curt 2026-11-24); a search or filter opens them so the matches show
+    var autoOpen = !!(q && String(q).trim()) || !!filtered;
+    days.forEach(function (day) { main.appendChild(buildDay(day, byDay[day] || [], day === today, autoOpen)); });
   }
   function pad(n) { return n < 10 ? '0' + n : String(n); }
 
-  function buildDay(day, pos, isToday) {
+  function buildDay(day, pos, isToday, autoOpen) {
     var sec = el('section', 'day');
     var live = pos.filter(function (p) { return !p.draft; });
     var drafts = pos.length - live.length;
     var head = live.reduce(function (s, p) { return s + (+p.head || 0); }, 0);
 
     var hdr = el('div', 'day-hdr' + (isToday ? ' today' : ''));
-    var left = el('div');
-    left.appendChild(el('div', 'day-title', fmtDay(day) + (isToday ? ' (today)' : '')));
+    var left = el(pos.length ? 'button' : 'div', pos.length ? 'day-open' : null);
+    var chev = el('span', 'day-chev');
+    var title = el('div', 'day-title');
+    if (pos.length) { left.type = 'button'; title.appendChild(chev); }
+    title.appendChild(document.createTextNode(fmtDay(day) + (isToday ? ' (today)' : '')));
+    left.appendChild(title);
     var sum = live.length + (live.length === 1 ? ' PO' : ' POs') + ' · ' + fmtNum(head) + ' head';
     if (drafts) sum += ' + ' + drafts + ' draft';
     left.appendChild(el('div', 'day-sum', sum));
@@ -714,15 +720,27 @@
       return cmp(a.plant, b.plant) || cmp(a.producer, b.producer) || cmp(a.complex, b.complex) || cmp(a.grower, b.grower);
     });
     var rows = pos.map(buildPo);
+    var body = el('div', 'day-body');
+    rows.forEach(function (r) { body.appendChild(r.node); });
+    state.openDays = state.openDays || {};
+    var open = autoOpen || !!state.openDays[day];
+    function paintDay() {
+      body.hidden = !open;
+      chev.textContent = open ? '▾ ' : '▸ ';
+      left.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    left.addEventListener('click', function () { open = !open; state.openDays[day] = open; paintDay(); });
     var toggle = el('button', 'day-toggle', 'Expand all');
     toggle.type = 'button';
     toggle.addEventListener('click', function () {
-      var open = toggle.textContent === 'Expand all';
-      rows.forEach(function (r) { r.set(open); });
-      toggle.textContent = open ? 'Collapse all' : 'Expand all';
+      var all = toggle.textContent === 'Expand all';
+      if (all && !open) { open = true; state.openDays[day] = true; paintDay(); }
+      rows.forEach(function (r) { r.set(all); });
+      toggle.textContent = all ? 'Collapse all' : 'Expand all';
     });
     hdr.appendChild(toggle);
-    rows.forEach(function (r) { sec.appendChild(r.node); });
+    sec.appendChild(body);
+    paintDay();
     return sec;
   }
 
@@ -1084,10 +1102,33 @@
     if (!trucks.length) return null;
     var T = state.data.tarping, rules = T.rules;
     var sec = el('div', 'tarp');
-    sec.appendChild(el('div', 'sec-title', 'Tarping'));
+    // collapsed by default (Curt 2026-11-24): one tap on the header opens the truck cards; the choice is kept
+    // for this PO until the app is closed
+    tarp.openPo = tarp.openPo || {};
+    var open = !!tarp.openPo[po.id];
+    var head = el('button', 'tarp-head');
+    head.type = 'button';
+    var inner = el('div', 'tarp-body');
+    function paintHead() {
+      var n = trucks.length, conf = trucks.filter(function (t) { return !!draftFor(t).conf; }).length;
+      var colds = trucks.map(function (t) { return t.coldF; }).filter(function (v) { return v != null; });
+      var bits = [n + (n === 1 ? ' truck' : ' trucks')];
+      if (colds.length) bits.push('coldest ' + Math.min.apply(null, colds) + '°F');
+      bits.push(conf + ' of ' + n + ' confirmed');
+      head.textContent = '';
+      head.appendChild(el('span', 'tarp-head-t', 'Tarping'));
+      head.appendChild(el('span', 'tarp-head-s', bits.join(' · ')));
+      head.appendChild(el('span', 'tarp-chev', open ? '▾' : '▸'));
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      inner.hidden = !open;
+    }
+    head.addEventListener('click', function () { open = !open; tarp.openPo[po.id] = open; paintHead(); });
+    sec.appendChild(head);
+    sec.appendChild(inner);
     var cards = [], textHost = el('div', 'ttext');
 
     function paintText() {
+      paintHead();
       textHost.textContent = '';
       var list = trucks.filter(function (t) { return t.rec && t.layout; }).map(function (t) { return { t: t, d: draftFor(t) }; });
       var seen = {}, names = (po.crew || []).filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
@@ -1134,9 +1175,9 @@
     }
 
     trucks.forEach(function (t) { cards.push(buildTruck(po, t, paintText)); });
-    cards.forEach(function (c) { sec.appendChild(c); });
-    sec.appendChild(el('div', 'sec-title', 'Crew boss'));
-    sec.appendChild(textHost);
+    cards.forEach(function (c) { inner.appendChild(c); });
+    inner.appendChild(el('div', 'sec-title', 'Crew boss'));
+    inner.appendChild(textHost);
     paintText();
     return sec;
   }
