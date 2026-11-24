@@ -4,12 +4,12 @@
 // served from the phone's saved copy. Without a version in their URL a new page could run with the
 // previous version's script (2026-11-23: the new filter dropdowns came up empty on an iPhone).
 // With it, a new page asks for app.js?v5, finds nothing saved under that name and fetches it.
-const VERSION = 'v6';
+const VERSION = 'v8';
 const SHELL_CACHE = 'shell-' + VERSION;
 const DATA_CACHE = 'data-live'; // separate from shell so shell bumps never wipe the saved schedule
 const SHELL = [
   './', 'index.html', 'app.js?' + VERSION, 'style.css?' + VERSION, 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png', 'icons/logo-white.png'
 ];
 
 const DATA_TIMEOUT_MS = 4000; // weak signal: show the saved copy instead of hanging

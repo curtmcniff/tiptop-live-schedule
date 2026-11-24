@@ -12,16 +12,21 @@
 <meta name="apple-mobile-web-app-title" content="Live Schedule">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="style.css?v6">
+<link rel="stylesheet" href="style.css?v8">
 </head>
 <body>
 <header id="hdr">
   <div class="hdr-row">
+    <img class="logo" src="icons/logo-white.png" alt="Tip Top" width="61" height="40">
     <div class="hdr-text">
       <h1>Live Schedule</h1>
       <div id="updated" class="updated">Loading…</div>
     </div>
     <button id="refresh" type="button" aria-label="Refresh data" title="Refresh">&#8635;</button>
+  </div>
+  <div id="views" class="views" role="tablist" aria-label="View" hidden>
+    <button id="v-schedule" type="button" role="tab" aria-selected="true">Schedule</button>
+    <button id="v-directory" type="button" role="tab" aria-selected="false">Directory</button>
   </div>
 </header>
 <div id="banners">
@@ -30,15 +35,23 @@
 </div>
 <nav id="tabs" class="tabs" aria-label="Week" hidden></nav>
 <div id="searchwrap" class="searchwrap" hidden>
-  <input id="search" type="search" placeholder="Search grower, complex, catcher, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
+  <input id="search" type="search" placeholder="Search grower, complex, catcher, breeder mgr, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
   <div class="filters">
     <label>Producer<select id="f-producer" aria-label="Producer filter"></select></label>
     <label>Complex<select id="f-complex" aria-label="Complex filter"></select></label>
     <label>Catcher<select id="f-catcher" aria-label="Catcher filter"></select></label>
+    <label>Breeder Mgr<select id="f-bm" aria-label="Breeder manager filter"></select></label>
   </div>
   <div id="matches" class="matches" hidden></div>
 </div>
+<div id="dirwrap" class="searchwrap" hidden>
+  <input id="dsearch" type="search" placeholder="Search name, company, complex, phone" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search contacts">
+  <div class="filters one">
+    <label>Company<select id="d-company" aria-label="Company filter"></select></label>
+  </div>
+  <div id="dmatches" class="matches" hidden></div>
+</div>
 <main id="main"></main>
-<script src="app.js?v6"></script>
+<script src="app.js?v8"></script>
 </body>
 </html>

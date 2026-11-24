@@ -6,7 +6,8 @@
   var REFETCH_MS = 10 * 60 * 1000;
 
   var $ = function (id) { return document.getElementById(id); };
-  var state = { data: null, offline: false, weekIdx: 0, query: '', lastFetch: 0, firstRender: true, loading: false, filters: null };
+  var state = { data: null, offline: false, weekIdx: 0, query: '', lastFetch: 0, firstRender: true, loading: false, filters: null,
+    view: 'schedule', dquery: '', dcompany: '' };
 
   // ---------- helpers ----------
   function el(tag, cls, text) {
@@ -65,21 +66,35 @@
     return n + (n === 1 ? ' PO' : ' POs') + (drafts ? ' (' + drafts + ' draft)' : '');
   }
 
-  // ---------- filters (producer / complex / catcher) ----------
+  // ---------- filters (producer / complex / catcher / breeder manager) ----------
   // Kept per phone in localStorage, so a crew lead's or a complex's choice is there next time.
   // They apply on top of the week tabs and the search box.
   var FILTER_KEY = 'ttls.filters';
-  var NONE = '__none__'; // catcher filter: POs with no catcher assigned yet
+  var NONE = '__none__'; // POs with no catcher / no breeder manager on file
   var FILTERS = [
     { key: 'producer', id: 'f-producer' },
     { key: 'complex', id: 'f-complex' },
-    { key: 'catcher', id: 'f-catcher' }
+    { key: 'catcher', id: 'f-catcher', none: 'No catcher yet' },
+    { key: 'bm', id: 'f-bm', none: 'No breeder mgr on file' }
   ];
+  function noneLabel(f) { return f.none || 'None'; }
+  function blankFilters() {
+    var o = {};
+    FILTERS.forEach(function (f) { o[f.key] = ''; });
+    return o;
+  }
   function loadFilters() {
     var f = null;
     try { f = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch (e) { f = null; }
     f = f || {};
-    return { producer: f.producer || '', complex: f.complex || '', catcher: f.catcher || '' };
+    var o = blankFilters();
+    FILTERS.forEach(function (x) { if (f[x.key]) o[x.key] = String(f[x.key]); });
+    return o;
+  }
+  // breeder managers on file for the PO's complex (the same list the PO's Breeder manager rows show)
+  function bmNames(po) {
+    var cs = (state.data && state.data.contacts && state.data.contacts[po.complex]) || [];
+    return cs.map(function (c) { return c && c.name; }).filter(Boolean);
   }
   function saveFilters() {
     try { localStorage.setItem(FILTER_KEY, JSON.stringify(state.filters)); } catch (e) { /* private mode */ }
@@ -89,16 +104,18 @@
   }
   function poValues(po, key) {
     if (key === 'catcher') return po.crew && po.crew.length ? po.crew : [NONE];
+    if (key === 'bm') { var b = bmNames(po); return b.length ? b : [NONE]; }
     return po[key] ? [po[key]] : [];
   }
   // true when the PO passes every chosen filter; `skip` leaves one out (to list that filter's own choices)
-  function passes(po, skip) {
+  function passesWith(po, filters, skip) {
     return FILTERS.every(function (f) {
-      var v = state.filters[f.key];
+      var v = filters[f.key];
       return !v || f.key === skip || poValues(po, f.key).indexOf(v) !== -1;
     });
   }
-  // each list offers only values that still have POs under the other two choices (all weeks)
+  function passes(po, skip) { return passesWith(po, state.filters, skip); }
+  // each list offers only values that still have POs under the other three choices (all weeks)
   function renderFilters() {
     var pos = state.data.pos;
     FILTERS.forEach(function (f) {
@@ -116,7 +133,7 @@
       all.value = '';
       sel.appendChild(all);
       names.forEach(function (v) {
-        var o = el('option', null, v === NONE ? 'No catcher yet' : v);
+        var o = el('option', null, v === NONE ? noneLabel(f) : v);
         o.value = v;
         sel.appendChild(o);
       });
@@ -132,8 +149,8 @@
     var span = el('span');
     if (on) {
       // full names, since a narrow phone cuts them off inside the dropdowns
-      var names = FILTERS.map(function (f) { return state.filters[f.key]; }).filter(Boolean)
-        .map(function (v) { return v === NONE ? 'No catcher yet' : v; });
+      var names = FILTERS.filter(function (f) { return !!state.filters[f.key]; })
+        .map(function (f) { var v = state.filters[f.key]; return v === NONE ? noneLabel(f) : v; });
       span.appendChild(el('b', 'fnames', names.join(' · ')));
     }
     span.appendChild(document.createTextNode(text));
@@ -142,7 +159,7 @@
       var b = el('button', 'clearf', 'Clear filters');
       b.type = 'button';
       b.addEventListener('click', function () {
-        state.filters = { producer: '', complex: '', catcher: '' };
+        state.filters = blankFilters();
         saveFilters();
         render();
       });
@@ -274,6 +291,8 @@
       $('stale').hidden = true;
       $('tabs').hidden = true;
       $('searchwrap').hidden = true;
+      $('views').hidden = true;
+      $('dirwrap').hidden = true;
       main.appendChild(el('div', 'msg',
         state.offline
           ? 'No schedule data available. You appear to be offline and no saved copy exists yet. Connect to the internet and tap ↻.'
@@ -283,6 +302,19 @@
     }
     updateBanners();
 
+    $('views').hidden = false;
+    $('v-schedule').setAttribute('aria-selected', String(state.view !== 'directory'));
+    $('v-directory').setAttribute('aria-selected', String(state.view === 'directory'));
+    if (state.view === 'directory') {
+      $('tabs').hidden = true;
+      $('searchwrap').hidden = true;
+      $('dirwrap').hidden = false;
+      renderDirectory(main);
+      addForget(main);
+      syncSticky();
+      return;
+    }
+    $('dirwrap').hidden = true;
     $('tabs').hidden = false;
     $('searchwrap').hidden = false;
     var on = filtersOn();
@@ -293,7 +325,7 @@
     var list;
     if (q) {
       list = d.pos.filter(function (po) {
-        return passes(po) && [po.grower, po.complex, po.producer, po.id].concat(po.crew || []).some(function (v) {
+        return passes(po) && [po.grower, po.complex, po.producer, po.id].concat(po.crew || [], bmNames(po)).some(function (v) {
           return v && String(v).toLowerCase().indexOf(q) !== -1;
         });
       });
@@ -305,20 +337,193 @@
       setMatches(on ? countLabel(list) + ' this week' : '', on);
       renderDays(main, list, w, '', on);
     }
-    if (state.enc) {
-      var forget = el('button', 'forget', 'Remove access from this phone');
-      forget.type = 'button';
-      forget.addEventListener('click', function () {
-        if (window.confirm('Remove access from this phone? The access code will be needed again.')) { setAccess(null); location.reload(); }
-      });
-      main.appendChild(forget);
-    }
+    addForget(main);
     syncSticky();
     if (state.firstRender) {
       state.firstRender = false;
       var t = main.querySelector('.day-hdr.today');
       if (t) t.scrollIntoView({ block: 'start' });
     }
+  }
+
+  function addForget(main) {
+    if (!state.enc) return;
+    var forget = el('button', 'forget', 'Remove access from this phone');
+    forget.type = 'button';
+    forget.addEventListener('click', function () {
+      if (window.confirm('Remove access from this phone? The access code will be needed again.')) { setAccess(null); location.reload(); }
+    });
+    main.appendChild(forget);
+  }
+
+  // ---------- directory: every contact in the Power Apps contacts export ----------
+  // Each card has Call / Text / Email buttons and, when the person is tied to POs in the seven
+  // weeks, a "N POs" button that opens the schedule filtered to them: a breeder manager by the
+  // Breeder Mgr filter, anyone else by their Complex, else by their Company (= the PO's Producer).
+  function normKey(s) { return String(s || '').replace(/'/g, '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+  // a name without its quoted nickname: Samuel "Andy" Edwards = Samuel Edwards
+  function dirKey(s) { return normKey(String(s || '').replace(/"[^"]*"/g, ' ').replace(/\([^)]*\)/g, ' ')); }
+  var linkCache = { data: null };
+  function linkIndex() {
+    var d = state.data;
+    if (linkCache.data === d) return linkCache;
+    var bm = {}, cx = {}, prod = {}, mail = {};
+    Object.keys(d.contacts || {}).forEach(function (complex) {
+      (d.contacts[complex] || []).forEach(function (c) { if (c && c.name && !bm[dirKey(c.name)]) bm[dirKey(c.name)] = c.name; });
+    });
+    d.pos.forEach(function (po) {
+      if (po.complex) cx[normKey(po.complex)] = po.complex;
+      if (po.producer) prod[normKey(po.producer)] = po.producer;
+    });
+    (Array.isArray(d.directory) ? d.directory : []).forEach(function (c) {
+      if (c && c.name && c.email && !mail[dirKey(c.name)]) mail[dirKey(c.name)] = c.email;
+    });
+    linkCache = { data: d, bm: bm, cx: cx, prod: prod, mail: mail, links: {} };
+    return linkCache;
+  }
+  function contactLink(c) {
+    var ix = linkIndex(), id = dirKey(c.name) + '|' + normKey(c.complex) + '|' + normKey(c.company);
+    if (ix.links[id] !== undefined) return ix.links[id];
+    var link = null, k = dirKey(c.name);
+    if (ix.bm[k]) link = { key: 'bm', value: ix.bm[k] };
+    else if (c.complex && ix.cx[normKey(c.complex)]) link = { key: 'complex', value: ix.cx[normKey(c.complex)] };
+    else if (c.company && ix.prod[normKey(c.company)]) link = { key: 'producer', value: ix.prod[normKey(c.company)] };
+    if (link) {
+      var f = blankFilters();
+      f[link.key] = link.value;
+      link.count = state.data.pos.filter(function (po) { return passesWith(po, f); }).length;
+      if (!link.count) link = null;
+    }
+    ix.links[id] = link;
+    return link;
+  }
+  // open the schedule filtered to one contact; stay on the open week if it has any of their POs,
+  // else go to the first week from this one on (then earlier) that has
+  function showPos(link) {
+    state.filters = blankFilters();
+    state.filters[link.key] = link.value;
+    saveFilters();
+    state.query = '';
+    $('search').value = '';
+    state.view = 'schedule';
+    var weeks = state.data.weeks;
+    function count(i) {
+      var w = weeks[i];
+      return state.data.pos.filter(function (po) { return po.kill >= w.start && po.kill <= w.end && passes(po); }).length;
+    }
+    if (!weeks[state.weekIdx] || !count(state.weekIdx)) {
+      var cur = defaultWeek(), pick = -1, i;
+      for (i = cur; i < weeks.length && pick < 0; i++) if (count(i)) pick = i;
+      for (i = cur - 1; i >= 0 && pick < 0; i--) if (count(i)) pick = i;
+      if (pick >= 0) state.weekIdx = pick;
+    }
+    render();
+    window.scrollTo(0, 0);
+  }
+  function linkBtn(label, href, cls, aria) {
+    var a = el('a', 'btn' + (cls ? ' ' + cls : ''), label);
+    a.href = href;
+    if (aria) a.setAttribute('aria-label', aria);
+    return a;
+  }
+  function dirCard(c) {
+    var card = el('div', 'dcard');
+    card.appendChild(el('div', 'nm', dash(c.name)));
+    var sub = [c.title, c.complex].filter(Boolean).join(' · ');
+    if (sub) card.appendChild(el('div', 'sub', sub));
+    var m = digits(c.mobile), o = digits(c.office);
+    if (o === m) o = null;
+    var nums = [];
+    if (m) nums.push('Mobile ' + fmtPhone(m));
+    if (o) nums.push('Office ' + fmtPhone(o));
+    if (nums.length) card.appendChild(el('div', 'nums', nums.join(' · ')));
+    if (c.email) card.appendChild(el('div', 'nums', c.email));
+    var b = el('div', 'dbtns'), who = c.name || '';
+    if (m || o) b.appendChild(linkBtn('Call', 'tel:+1' + (m || o), '', 'Call ' + who + (m ? ' mobile' : ' office')));
+    if (m) b.appendChild(linkBtn('Text', 'sms:+1' + m, 'text', 'Text ' + who));
+    if (c.email) b.appendChild(linkBtn('Email', 'mailto:' + c.email, 'mail', 'Email ' + who));
+    if (m && o) b.appendChild(linkBtn('Office', 'tel:+1' + o, '', 'Call ' + who + ' office'));
+    var link = contactLink(c);
+    if (link) {
+      var p = el('button', 'btn pos', link.count + (link.count === 1 ? ' PO' : ' POs'));
+      p.type = 'button';
+      p.setAttribute('aria-label', 'Show the ' + link.count + ' POs for ' + who);
+      p.addEventListener('click', function () { showPos(link); });
+      b.appendChild(p);
+    }
+    if (b.childNodes.length) card.appendChild(b);
+    if (!m && !o && !c.email) card.appendChild(el('div', 'none', 'No phone or email on file'));
+    return card;
+  }
+  function renderDirectory(main) {
+    var all = Array.isArray(state.data.directory) ? state.data.directory.slice() : null;
+    if (!all) {
+      $('dirwrap').hidden = true;
+      main.appendChild(el('div', 'msg', 'The directory comes with the next schedule update. Tap ↻ when you have signal.'));
+      return;
+    }
+    all.sort(function (a, b) {
+      return (a.company ? 0 : 1) - (b.company ? 0 : 1) || cmp(a.company, b.company) || cmp(a.name, b.name);
+    });
+    // company list: always every company, so a choice can be changed without clearing first
+    var sel = $('d-company'), cos = {}, names = [];
+    all.forEach(function (c) { var k = c.company || NONE; if (!cos[k]) { cos[k] = true; names.push(k); } });
+    if (state.dcompany && !cos[state.dcompany]) state.dcompany = '';
+    sel.textContent = '';
+    var o0 = el('option', null, 'All');
+    o0.value = '';
+    sel.appendChild(o0);
+    names.forEach(function (k) {
+      var o = el('option', null, k === NONE ? 'No company' : k);
+      o.value = k;
+      sel.appendChild(o);
+    });
+    sel.value = state.dcompany;
+    sel.classList.toggle('on', !!state.dcompany);
+
+    var q = state.dquery.trim().toLowerCase(), qd = q.replace(/\D/g, '');
+    var list = all.filter(function (c) {
+      if (state.dcompany && (c.company || NONE) !== state.dcompany) return false;
+      if (!q) return true;
+      if ([c.name, c.title, c.company, c.complex, c.role, c.email].some(function (v) { return v && String(v).toLowerCase().indexOf(q) !== -1; })) return true;
+      // a caller's number, typed in any format
+      return qd.length >= 3 && [c.mobile, c.office].some(function (p) { return p && String(p).replace(/\D/g, '').indexOf(qd) !== -1; });
+    });
+
+    var dm = $('dmatches'), on = !!(q || state.dcompany);
+    dm.textContent = '';
+    dm.hidden = false;
+    dm.appendChild(el('span', null, list.length + (list.length === 1 ? ' contact' : ' contacts') + (on ? ' of ' + all.length : '')));
+    if (on) {
+      var clr = el('button', 'clearf', 'Clear');
+      clr.type = 'button';
+      clr.addEventListener('click', function () {
+        state.dquery = '';
+        state.dcompany = '';
+        $('dsearch').value = '';
+        render();
+      });
+      dm.appendChild(clr);
+    }
+    if (!list.length) {
+      main.appendChild(el('div', 'msg', 'No contacts match.'));
+      return;
+    }
+    var groups = [], gi = {};
+    list.forEach(function (c) {
+      var k = c.company || '';
+      if (gi[k] === undefined) { gi[k] = groups.length; groups.push({ name: k, items: [] }); }
+      groups[gi[k]].items.push(c);
+    });
+    groups.forEach(function (g) {
+      var sec = el('section', 'dir-group');
+      var h = el('div', 'dir-co');
+      h.appendChild(el('span', null, g.name || 'No company'));
+      h.appendChild(el('small', null, g.items.length + (g.items.length === 1 ? ' contact' : ' contacts')));
+      sec.appendChild(h);
+      g.items.forEach(function (c) { sec.appendChild(dirCard(c)); });
+      main.appendChild(sec);
+    });
   }
 
   // first visit on a phone (or access revoked): ask for the access code
@@ -328,6 +533,7 @@
     var main = $('main');
     main.textContent = '';
     $('tabs').hidden = true; $('searchwrap').hidden = true; $('stale').hidden = true;
+    $('views').hidden = true; $('dirwrap').hidden = true;
     $('offline').hidden = !state.offline;
     $('updated').textContent = 'Access code needed';
     var form = el('form', 'lock');
@@ -580,7 +786,8 @@
     } else {
       cs.forEach(function (c) {
         var m = digits(c.mobile), o = digits(c.office);
-        body.appendChild(contactRow(c.name, c.title, m || o, m, m || o));
+        var em = c.email || linkIndex().mail[dirKey(c.name)] || null;
+        body.appendChild(contactRow(c.name, c.title, m || o, m, m || o, em));
       });
     }
 
@@ -594,6 +801,11 @@
         var c = (state.data.catchers && state.data.catchers[name]) || {};
         var m = digits(c.mobile), o = digits(c.office);
         body.appendChild(contactRow(name, c.contact || null, m || o, m, m || o));
+        // secondary contacts for the same crew
+        (Array.isArray(c.more) ? c.more : []).forEach(function (x) {
+          var m2 = digits(x.mobile), o2 = digits(x.office);
+          body.appendChild(contactRow(name, x.contact || null, m2 || o2, m2, m2 || o2));
+        });
       });
     }
 
@@ -627,25 +839,33 @@
     return body;
   }
 
-  function contactRow(name, title, callNum, textNum, shown) {
+  function contactRow(name, title, callNum, textNum, shown, email) {
     var r = el('div', 'contact');
     var who = el('div', 'who');
     who.appendChild(document.createTextNode(dash(name)));
     if (title) who.appendChild(el('small', null, title));
     if (shown) who.appendChild(el('small', 'phone', fmtPhone(shown)));
+    if (!callNum && email) who.appendChild(el('small', null, 'No phone on file'));
     r.appendChild(who);
-    if (!callNum) {
+    if (!callNum && !email) {
       r.appendChild(el('span', 'none', 'No phone on file'));
       return r;
     }
     var b = el('div', 'btns');
-    var call = el('a', 'btn', 'Call');
-    call.href = 'tel:+1' + callNum;
-    b.appendChild(call);
+    if (callNum) {
+      var call = el('a', 'btn', 'Call');
+      call.href = 'tel:+1' + callNum;
+      b.appendChild(call);
+    }
     if (textNum) {
       var t = el('a', 'btn text', 'Text');
       t.href = 'sms:+1' + textNum;
       b.appendChild(t);
+    }
+    if (email) {
+      var e = el('a', 'btn mail', 'Email');
+      e.href = 'mailto:' + email;
+      b.appendChild(e);
     }
     r.appendChild(b);
     return r;
@@ -664,6 +884,22 @@
   $('refresh').addEventListener('click', function () { load(true); });
   $('search').addEventListener('input', function (e) {
     state.query = e.target.value;
+    render();
+  });
+  ['schedule', 'directory'].forEach(function (v) {
+    $('v-' + v).addEventListener('click', function () {
+      if (state.view === v) return;
+      state.view = v;
+      render();
+      window.scrollTo(0, 0);
+    });
+  });
+  $('dsearch').addEventListener('input', function (e) {
+    state.dquery = e.target.value;
+    render();
+  });
+  $('d-company').addEventListener('change', function (e) {
+    state.dcompany = e.target.value;
     render();
   });
   state.filters = loadFilters();

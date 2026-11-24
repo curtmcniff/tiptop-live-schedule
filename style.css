@@ -21,6 +21,7 @@
   --btn: #1B6B35;
   --btn-text: #FFFFFF;
   --btn2: #1F4E8C;
+  --btn3: #6A3D9A;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -43,6 +44,7 @@
     --grey-text: #EEEEEE;
     --btn: #2E9A52;
     --btn2: #4A86D6;
+    --btn3: #8E5CC9;
   }
 }
 * { box-sizing: border-box; }
@@ -61,8 +63,19 @@ body {
   background: var(--hdr); color: var(--hdr-text);
   padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
 }
-.hdr-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hdr-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.logo { flex: 0 0 auto; height: 40px; width: auto; display: block; }
+.hdr-text { flex: 1 1 auto; min-width: 0; }
 h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
+
+/* Schedule / Directory switch under the title */
+.views { display: flex; gap: 8px; margin-top: 8px; }
+.views button {
+  flex: 1 1 0; min-height: 40px; border-radius: 10px; cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.7); background: transparent; color: #fff;
+  font: inherit; font-weight: 700;
+}
+.views button[aria-selected="true"] { background: #fff; border-color: #fff; color: var(--hdr); }
 .updated { font-size: 0.95rem; opacity: 0.95; }
 #refresh {
   min-width: 48px; min-height: 48px; border-radius: 24px;
@@ -109,7 +122,7 @@ h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
 .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .tab[aria-selected="true"] span { color: #fff; }
 .searchwrap { padding: 0 10px 8px; }
-#search {
+#search, #dsearch {
   width: 100%; min-height: 48px; padding: 8px 12px; font: inherit;
   border: 2px solid var(--line); border-radius: 10px;
   background: var(--surface); color: var(--text);
@@ -123,8 +136,10 @@ h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
   border: 2px solid var(--accent); background: var(--surface); color: var(--accent); font: inherit; font-weight: 700;
 }
 
-/* producer / complex / catcher filters */
-.filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+/* producer / complex / catcher / breeder mgr filters: two by two on a phone, one row when wide */
+.filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.filters.one { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } .filters.one { grid-template-columns: minmax(0, 1fr); } }
 .filters label {
   display: block; min-width: 0; color: var(--muted);
   font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
@@ -195,7 +210,32 @@ a.btn {
   background: var(--btn); color: var(--btn-text); font-weight: 700; text-decoration: none;
 }
 a.btn.text { background: var(--btn2); }
+a.btn.mail { background: var(--btn3); }
 a.btn:active { opacity: 0.8; }
+.btns { flex-wrap: wrap; }
+
+/* Directory: one card per contact, grouped by company */
+.dir-co {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-top: 12px; padding: 8px 10px; background: var(--surface2); border-radius: 10px 10px 0 0;
+  border-bottom: 2px solid var(--line); font-weight: 700; font-size: 1.05rem;
+}
+.dir-co small { color: var(--muted); font-weight: 600; font-size: 0.9rem; white-space: nowrap; }
+.dcard { background: var(--surface); border-bottom: 1px solid var(--line); padding: 10px 12px; }
+.dcard:last-child { border-radius: 0 0 10px 10px; border-bottom: 0; }
+.dcard .nm { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+.dcard .sub, .dcard .nums { color: var(--muted); font-size: 0.9rem; overflow-wrap: anywhere; }
+.dbtns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.dbtns .btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 72px; min-height: 48px; padding: 0 14px; border-radius: 10px; border: 0;
+  background: var(--btn); color: var(--btn-text); font: inherit; font-weight: 700; text-decoration: none; cursor: pointer;
+}
+.dbtns a.btn.text { background: var(--btn2); }
+.dbtns a.btn.mail { background: var(--btn3); }
+.dbtns .btn.pos { background: var(--surface); color: var(--accent); border: 2px solid var(--accent); }
+.dbtns .btn:active { opacity: 0.8; }
+.dcard .none { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }
 .phone { font-size: 0.85rem; color: var(--muted); }
 
 /* one line per truck under a PO (hauler / driver / leave / trailer) */
