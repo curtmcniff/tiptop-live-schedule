@@ -2,35 +2,35 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Live Schedule</title>
+<title>Live Ops</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <meta name="theme-color" content="#C72E27">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Live Schedule">
+<meta name="apple-mobile-web-app-title" content="Live Ops">
 <meta name="description" content="Tip Top live haul schedule. Access code required.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Tip Top Live Schedule">
+<meta property="og:title" content="Tip Top Live Ops">
 <meta property="og:description" content="Live haul schedule and contacts. Access code required.">
 <meta property="og:url" content="https://curtmcniff.github.io/tiptop-live-schedule/">
-<meta property="og:image" content="https://curtmcniff.github.io/tiptop-live-schedule/icons/og-image.png">
+<meta property="og:image" content="https://curtmcniff.github.io/tiptop-live-schedule/icons/og-image.png?v10">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Tip Top logo - Live Schedule">
+<meta property="og:image:alt" content="Tip Top logo - Live Ops">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="style.css?v9">
+<link rel="stylesheet" href="style.css?v11">
 </head>
 <body>
 <header id="hdr">
   <div class="hdr-row">
     <img class="logo" src="icons/logo-white.png" alt="Tip Top" width="61" height="40">
     <div class="hdr-text">
-      <h1>Live Schedule</h1>
+      <h1>Live Ops</h1>
       <div id="updated" class="updated">Loading…</div>
     </div>
     <button id="refresh" type="button" aria-label="Refresh data" title="Refresh">&#8635;</button>
@@ -43,11 +43,14 @@
 <div id="banners">
   <div id="stale" class="banner amber" hidden></div>
   <div id="offline" class="banner grey" hidden>Offline — showing saved copy</div>
+  <div id="tarpbanner" class="banner red" hidden></div>
 </div>
+<div id="tarpbar" class="tarpbar" hidden></div>
 <nav id="tabs" class="tabs" aria-label="Week" hidden></nav>
 <div id="searchwrap" class="searchwrap" hidden>
   <input id="search" type="search" placeholder="Search grower, complex, catcher, breeder mgr, PO" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search">
   <div class="filters">
+    <label>Plant<select id="f-plant" aria-label="Plant filter"></select></label>
     <label>Producer<select id="f-producer" aria-label="Producer filter"></select></label>
     <label>Complex<select id="f-complex" aria-label="Complex filter"></select></label>
     <label>Catcher<select id="f-catcher" aria-label="Catcher filter"></select></label>
@@ -63,6 +66,7 @@
   <div id="dmatches" class="matches" hidden></div>
 </div>
 <main id="main"></main>
-<script src="app.js?v9"></script>
+<script src="tarping_log.js?v11"></script>
+<script src="app.js?v11"></script>
 </body>
 </html>

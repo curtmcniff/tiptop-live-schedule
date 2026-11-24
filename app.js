@@ -72,6 +72,7 @@
   var FILTER_KEY = 'ttls.filters';
   var NONE = '__none__'; // POs with no catcher / no breeder manager on file
   var FILTERS = [
+    { key: 'plant', id: 'f-plant' },          // Curt 2026-11-24: all POs for New Market, Marietta or Tyson
     { key: 'producer', id: 'f-producer' },
     { key: 'complex', id: 'f-complex' },
     { key: 'catcher', id: 'f-catcher', none: 'No catcher yet' },
@@ -288,6 +289,7 @@
     $('offline').hidden = !state.offline;
     if (!d) {
       $('updated').textContent = 'No data';
+      tarpBarRefresh();
       $('stale').hidden = true;
       $('tabs').hidden = true;
       $('searchwrap').hidden = true;
@@ -536,6 +538,7 @@
     $('views').hidden = true; $('dirwrap').hidden = true;
     $('offline').hidden = !state.offline;
     $('updated').textContent = 'Access code needed';
+    tarpBarRefresh();
     var form = el('form', 'lock');
     form.appendChild(el('h2', null, 'Enter your access code'));
     form.appendChild(el('p', null, 'You only need to do this once on this phone. Codes come from Live Supply.'));
@@ -574,6 +577,7 @@
     var d = state.data;
     $('offline').hidden = !state.offline;
     $('updated').textContent = 'Updated ' + (d.asOfLabel || '—');
+    tarpBarRefresh();
     var stale = $('stale');
     var asOf = d.asOf ? new Date(d.asOf) : null;
     if (asOf && !isNaN(asOf)) {
@@ -779,6 +783,8 @@
       if (f && f.text) body.appendChild(el('div', 'flagbox', '⚠ ' + f.text));
     });
 
+    if (tarpActive()) { var tsec = buildTarping(po); if (tsec) body.appendChild(tsec); }
+
     body.appendChild(el('div', 'sec-title', 'Breeder manager'));
     var cs = (state.data.contacts && state.data.contacts[po.complex]) || [];
     if (!cs.length) {
@@ -895,6 +901,511 @@
     return r;
   }
 
+  // ---------- tarping (v11) ----------
+  // A section of this same app for the access slots in data.tarping.slots (Terry, Amber): per PO, per truck, the
+  // recommended tarp setup from the weather engine, overrides, a "Text crew boss" link, and a decision log that
+  // "Send log" mails to the back office. Nothing is sent by the app itself: sms: and mailto: links open the
+  // phone's own apps. Format of the log: tarping_log.js. Data without data.tarping shows nothing at all.
+  var TARP_DRAFTS = 'ttls.tarp';
+  var tarp = { log: null, logTo: null, drafts: null, plan: null, panel: null, open: {}, pruned: false, idx: null, idxFor: null, timer: null };
+
+  function isLocalHost() { return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname); }
+  function tarpSlot() {
+    var s = null, a = getAccess();
+    if (a) s = a.slot;
+    if (isLocalHost()) { // test override, this PC only
+      var q = /[?&]slot=([A-Za-z0-9]{2})(?:&|$)/.exec(location.search);
+      if (q) s = q[1];
+    }
+    return s ? String(s).toUpperCase() : null;
+  }
+  function tarpActive() {
+    var T = state.data && state.data.tarping, s = tarpSlot();
+    return !!(T && s && window.TarpingLog && Array.isArray(T.slots) && T.slots.indexOf(s) !== -1 && T.rules && T.trucks);
+  }
+  function tarpStore() { try { return window.localStorage; } catch (e) { return null; } }
+  function tlog() {
+    var T = state.data.tarping;
+    if (!tarp.log || tarp.logTo !== T.mailTo) {
+      // senders come from tarping\config.json via the build (Curt 2026-11-24: Curt McNiff too); module default otherwise
+      tarp.log = TarpingLog.createLog(tarpStore(), { to: T.mailTo || undefined, senders: Array.isArray(T.senders) && T.senders.length ? T.senders : undefined });
+      tarp.logTo = T.mailTo;
+    }
+    return tarp.log;
+  }
+  function tarpTrucks(po) {
+    var T = state.data.tarping;
+    if (tarp.idxFor !== T) {
+      tarp.idxFor = T; tarp.idx = {};
+      Object.keys(T.trucks).forEach(function (k) {
+        var t = T.trucks[k];
+        if (t && t.po) (tarp.idx[t.po] = tarp.idx[t.po] || []).push(t);
+      });
+      Object.keys(tarp.idx).forEach(function (p) { tarp.idx[p].sort(function (a, b) { return a.truck - b.truck; }); });
+    }
+    return tarp.idx[po.id] || [];
+  }
+
+  // per-truck work in progress (overrides, reason, top-row choice, crew text stamp, last confirm), kept on the phone
+  function allDrafts() {
+    if (!tarp.drafts) {
+      var o = null;
+      try { o = JSON.parse(localStorage.getItem(TARP_DRAFTS) || 'null'); } catch (e) { o = null; }
+      tarp.drafts = o && typeof o === 'object' ? o : {};
+      var cut = Date.now() - 10 * 86400000;
+      Object.keys(tarp.drafts).forEach(function (k) { if (!(tarp.drafts[k] && tarp.drafts[k].at > cut)) delete tarp.drafts[k]; });
+    }
+    return tarp.drafts;
+  }
+  function saveDrafts() {
+    try { localStorage.setItem(TARP_DRAFTS, JSON.stringify(tarp.drafts || {})); } catch (e) { /* private mode */ }
+  }
+  function copyPos(p) { return JSON.parse(JSON.stringify(p || {})); }
+  // a new forecast for the truck (layout, kind or run time changed) drops the old work in progress
+  function draftFor(t) {
+    var key = t.po + '|' + t.truck, base = [t.layout, t.kind, t.runAt].join('|'), all = allDrafts(), d = all[key];
+    if (!d || d.base !== base) {
+      d = all[key] = { base: base, at: Date.now(), pos: copyPos(TarpingLog.parseLayout(t.layout || '-').positions), reason: '', top: null, crewSent: '', conf: null };
+    }
+    return d;
+  }
+  function totals(pos) {
+    var h = 0, l = 0;
+    TarpingLog.POSITIONS.forEach(function (p) { if (pos[p]) { h += pos[p].H || 0; l += pos[p].L || 0; } });
+    return { H: h, L: l };
+  }
+  function topInfo(t) {
+    var tr = t.topRow;
+    if (!tr) return null;
+    var cannot = /cannot be emptied/i.test(tr.line || '');
+    return { tr: tr, cannot: cannot, has: !cannot, flagged: !!tr.flagged };
+  }
+  function topUse(t, d) {
+    var i = topInfo(t);
+    return !!(i && i.has && (d.top === null || d.top === undefined ? !i.flagged : d.top));
+  }
+  function nowHm() { return TarpingLog.isoMin(new Date()).slice(11); }
+  function clock12(hhmm) {
+    var h = +String(hhmm).slice(0, 2), m = String(hhmm).slice(3, 5);
+    return ((h + 11) % 12 + 1) + ':' + m + ' ' + (h < 12 ? 'AM' : 'PM');
+  }
+  function fcLabel(t) {
+    var r = String(t.runAt || '');
+    return (t.kind || 'Forecast') + (r.length >= 16 ? ' · ' + fmtDay(r.slice(0, 10)) + ' ' + clock12(r.slice(11, 16)) : '');
+  }
+  var POINT_NAME = { farm: 'farm', plant: 'plant', mid: 'midpoint' };
+  var POS_LABEL = { D: 'Driver side', P: 'Passenger side', T: 'Top', F: 'Front (nose)', R: 'Rear' };
+
+  // plan view, nose at the top, driver side on the left
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs, text) {
+    var n = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function trailerSvg(pos) {
+    var s = sv('svg', { viewBox: '0 -30 96 200', width: '78', height: '162', role: 'img', 'class': 'tdiag', 'aria-label': 'Truck from above: cab at the top, trailer below it, driver side on the left' });
+    // the truck cab ahead of the nose (Curt 2026-11-24: shows which end is the front), see-through
+    var cab = sv('g', { 'class': 'tp-cab' });
+    cab.appendChild(sv('rect', { x: 30, y: -27, width: 36, height: 24, rx: 6 }));          // cab roof
+    cab.appendChild(sv('path', { d: 'M33 -22 Q48 -29 63 -22', 'class': 'tp-cab-glass' }));  // windshield
+    cab.appendChild(sv('rect', { x: 25, y: -21, width: 4, height: 6, rx: 1 }));            // mirrors
+    cab.appendChild(sv('rect', { x: 67, y: -21, width: 4, height: 6, rx: 1 }));
+    cab.appendChild(sv('line', { x1: 48, y1: -3, x2: 48, y2: 2 }));                        // hitch
+    s.appendChild(cab);
+    s.appendChild(sv('rect', { x: 24, y: 16, width: 48, height: 138, rx: 3, 'class': 'tp-body' }));
+    function lab(k) {
+      var c = pos[k] || {}, a = [];
+      if (c.H) a.push(c.H + 'H');
+      if (c.L) a.push(c.L + 'L');
+      return a.join('+');
+    }
+    function cell(k, x, y, w, h) {
+      var c = pos[k] || {};
+      s.appendChild(sv('rect', { x: x, y: y, width: w, height: h, rx: 2, 'class': 'tp ' + (c.H ? 't-h' : c.L ? 't-l' : 't-n') }));
+    }
+    function txt(k, x, y, size, rot) {
+      var l = lab(k);
+      if (!l) return;
+      var a = { x: x, y: y, 'font-size': size, 'class': 'tp-lab ' + ((pos[k] || {}).H ? 'h' : 'l') };
+      if (rot) a.transform = 'rotate(' + rot + ' ' + x + ' ' + (y - 3) + ')';
+      s.appendChild(sv('text', a, l));
+    }
+    cell('T', 28, 20, 40, 130); cell('D', 10, 18, 11, 134); cell('P', 75, 18, 11, 134); cell('F', 24, 3, 48, 10); cell('R', 24, 157, 48, 10);
+    txt('T', 48, 89, 11); txt('D', 15.5, 89, 9, -90); txt('P', 80.5, 89, 9, 90); txt('F', 48, 11, 8); txt('R', 48, 165, 8);
+    return s;
+  }
+
+  // ---------- the crew-boss text ----------
+  function fillT(tpl, map) {
+    return String(tpl || '').replace(/\{(\w+)\}/g, function (m, k) { return map[k] === undefined ? m : map[k]; });
+  }
+  function setupText(pos, lang) {
+    var S = state.data.tarping.rules.sms, out = [];
+    TarpingLog.POSITIONS.forEach(function (k) {
+      var c = pos[k];
+      if (!c || !(c.H || c.L)) return;
+      var name = ((S.positions || {})[TarpingLog.POSITION_NAMES[k]] || {})[lang] || TarpingLog.POSITION_NAMES[k];
+      [['H', c.H, S.heavy], ['L', c.L, S.light]].forEach(function (x) {
+        if (!x[1]) return;
+        var w = lang === 'en' ? x[2].en : (x[1] > 1 ? x[2].esPlural || x[2].es : x[2].es);
+        out.push(lang === 'en' ? x[1] + w + ' ' + name : x[1] + ' ' + w + ' ' + name);
+      });
+    });
+    return out.length ? out.join(' / ') : S.none[lang];
+  }
+  // Spanish weekday for the Spanish block ("lun 11/23"), English fmtDay for the English one
+  var DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  function dayEs(ymd) {
+    var s = String(ymd || ''); if (s.length < 10) return s;
+    var d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)));
+    return DIAS[d.getUTCDay()] + ' ' + (+s.slice(5, 7)) + '/' + (+s.slice(8, 10));
+  }
+  // list = [{ t, d }] for the PO's trucks that have a recommendation
+  function smsBody(po, list) {
+    var S = state.data.tarping.rules.sms;
+    function block(lang) {
+      var f = list[0].t, cd = f.catch || po.catch;
+      var lines = [fillT(S.header[lang], { grower: po.grower || '', po: po.id, 'catch': lang === 'es' ? dayEs(cd) : fmtDay(cd) })];
+      list.forEach(function (x) {
+        lines.push(fillT(S.truck[lang], { n: x.t.truck, setup: setupText(x.d.pos, lang) }));
+        if (topUse(x.t, x.d)) lines.push('  ' + fillT(S.topRow[lang], { n: x.t.topRow.required }));
+      });
+      lines.push(S.footer[lang]);
+      return lines.join('\n');
+    }
+    return block('en') + '\n\n' + block('es');
+  }
+
+  // ---------- the section inside a PO ----------
+  function buildTarping(po) {
+    var trucks = tarpTrucks(po);
+    if (!trucks.length) return null;
+    var T = state.data.tarping, rules = T.rules;
+    var sec = el('div', 'tarp');
+    sec.appendChild(el('div', 'sec-title', 'Tarping'));
+    var cards = [], textHost = el('div', 'ttext');
+
+    function paintText() {
+      textHost.textContent = '';
+      var list = trucks.filter(function (t) { return t.rec && t.layout; }).map(function (t) { return { t: t, d: draftFor(t) }; });
+      var seen = {}, names = (po.crew || []).filter(function (n) { if (seen[n]) return false; seen[n] = true; return true; });
+      var none = function (who) {
+        var r = el('div', 'contact');
+        r.appendChild(el('div', 'who', who || 'Crew boss'));
+        var b = el('button', 'btn tarp-text off', 'No crew boss phone on file');
+        b.type = 'button'; b.disabled = true;
+        r.appendChild(b);
+        return r;
+      };
+      if (!names.length) { textHost.appendChild(none('')); return; }
+      names.forEach(function (name) {
+        var c = (state.data.catchers && state.data.catchers[name]) || {}, m = digits(c.mobile);
+        if (!m) { textHost.appendChild(none(name)); return; }
+        if (!list.length) {
+          var r0 = el('div', 'contact');
+          r0.appendChild(el('div', 'who', name));
+          var b0 = el('button', 'btn tarp-text off', 'No setup to text');
+          b0.type = 'button'; b0.disabled = true;
+          r0.appendChild(b0);
+          textHost.appendChild(r0);
+          return;
+        }
+        var r = el('div', 'contact');
+        var who = el('div', 'who');
+        who.appendChild(document.createTextNode(name));
+        var sent = list.filter(function (x) { return x.d.crewSent; }).map(function (x) { return x.d.crewSent; }).sort().pop();
+        if (sent) who.appendChild(el('small', null, 'Text opened ' + sent.slice(11)));
+        r.appendChild(who);
+        var a = el('a', 'btn text tarp-text', names.length > 1 ? 'Text ' + name : 'Text crew boss');
+        a.href = 'sms:+1' + m + '?body=' + encodeURIComponent(smsBody(po, list));
+        a.addEventListener('click', function () {
+          // the phone's own messages app opens with the text; here only the time is noted
+          var stamp = TarpingLog.isoMin(new Date()), ids = [];
+          list.forEach(function (x) { x.d.crewSent = stamp; if (x.d.conf) ids.push(x.d.conf.id); });
+          saveDrafts();
+          if (ids.length) tlog().setCrewSent(ids, stamp);
+          setTimeout(paintText, 600);
+        });
+        r.appendChild(a);
+        textHost.appendChild(r);
+      });
+    }
+
+    trucks.forEach(function (t) { cards.push(buildTruck(po, t, paintText)); });
+    cards.forEach(function (c) { sec.appendChild(c); });
+    sec.appendChild(el('div', 'sec-title', 'Crew boss'));
+    sec.appendChild(textHost);
+    paintText();
+    return sec;
+  }
+
+  function buildTruck(po, t, onChange) {
+    var T = state.data.tarping, rules = T.rules, inv = rules.inventory || { L: 3, H: 2 }, carried = rules.carried || { L: 3, H: 3 };
+    var key = t.po + '|' + t.truck, card = el('div', 'tcard'), msg = '';
+    card.setAttribute('data-truck', key);
+
+    function paint() {
+      card.textContent = '';
+      var d = draftFor(t), fin = TarpingLog.formatLayout(d.pos), tot = totals(d.pos);
+      var head = el('div', 't-head');
+      head.appendChild(el('b', null, 'Truck ' + t.truck + (t.of ? ' of ' + t.of : '')));
+      head.appendChild(el('span', 't-fc ' + (t.kind === 'Final' ? 'final' : 'prev'), fcLabel(t)));
+      card.appendChild(head);
+
+      if (!t.rec || !t.layout) {
+        card.appendChild(el('div', 't-none', 'No weather for this truck' + ((t.problems || []).length ? ' (' + t.problems.join('; ') + ')' : '') + '. Set its tarps in Power Apps.'));
+        return;
+      }
+
+      var row = el('div', 't-row');
+      row.appendChild(trailerSvg(d.pos));
+      var info = el('div', 't-info');
+      info.appendChild(el('div', 't-setup', TarpingLog.formatLayout(d.pos) === '-' ? 'No tarps' : setupText(d.pos, 'en')));
+      if (fin !== t.layout) info.appendChild(el('div', 't-was', 'Recommended: ' + (t.text || t.layout)));
+      var cold = 'Coldest ' + t.coldF + '°F';
+      if (t.coldAt) cold += ' · ' + (POINT_NAME[t.coldAt.point] || t.coldAt.point) + ' · ' + clock12(String(t.coldAt.hour).slice(11, 16));
+      info.appendChild(el('div', 't-cold', cold));
+      var tags = el('div', 'badges');
+      tags.appendChild(el('span', 'badge ' + (t.rain ? 'rainb' : ''), t.rain ? 'Rain' + (t.rainPct != null ? ' ' + t.rainPct + '%' : '') : 'Dry'));
+      if (t.category) tags.appendChild(el('span', 'badge', t.category));
+      if (t.warmDrop) tags.appendChild(el('span', 'badge pattern', 'Warming: no top light'));
+      info.appendChild(tags);
+      if (t.note) info.appendChild(el('div', 't-note', t.note));
+      row.appendChild(info);
+      card.appendChild(row);
+      // temperature at each weather point in the truck window: farm, midpoint (long haul), plant (Curt 2026-11-24)
+      var pts = (Array.isArray(t.points) ? t.points : []).filter(function (p) { return p && p.lowF != null; });
+      if (pts.length) {
+        var order = { farm: 0, mid: 1, plant: 2 };
+        pts.sort(function (a, b) { return (order[a.name] == null ? 9 : order[a.name]) - (order[b.name] == null ? 9 : order[b.name]); });
+        var tbl = el('div', 't-points');
+        pts.forEach(function (p) {
+          var isCold = t.coldAt && t.coldAt.point === p.name && t.coldF === p.lowF;
+          var pr = el('div', 't-pt' + (isCold ? ' cold' : ''));
+          var nm = { farm: 'Farm', mid: 'Midpoint', plant: 'Plant' }[p.name] || p.name;
+          var lbl = p.name === 'mid' || /^midpoint/i.test(p.label || '') ? '' : (p.label || '');
+          pr.appendChild(el('span', 't-pt-name', nm + (lbl ? ' · ' + lbl : '')));
+          pr.appendChild(el('span', 't-pt-temp', p.lowF + '°F' + (p.highF != null && p.highF !== p.lowF ? '–' + p.highF + '°F' : '')));
+          pr.appendChild(el('span', 't-pt-hour', 'low ' + clock12(String(p.lowAt || '').slice(11, 16))));
+          pr.appendChild(el('span', 't-pt-rain' + (p.rainPct >= (rules.rainProbPct || 45) ? ' wet' : ''), 'rain ' + (p.rainPct == null ? '-' : p.rainPct + '%')));
+          tbl.appendChild(pr);
+        });
+        card.appendChild(tbl);
+      }
+
+      // top row of coops
+      var ti = topInfo(t);
+      if (ti) {
+        var tb = el('div', 't-top' + (ti.flagged ? ' flag' : ''));
+        tb.appendChild(el('div', null, ti.tr.line));
+        if (ti.has) {
+          var use = topUse(t, d), btns = el('div', 'tbtns');
+          [['Use', true], ['Don\'t use', false]].forEach(function (o) {
+            var b = el('button', 'tbtn' + (use === o[1] ? ' on' : ''), o[0]);
+            b.type = 'button';
+            b.setAttribute('aria-pressed', String(use === o[1]));
+            b.setAttribute('data-top', o[1] ? 'use' : 'skip');
+            b.addEventListener('click', function () { d.top = o[1]; saveDrafts(); paint(); onChange(); });
+            btns.appendChild(b);
+          });
+          tb.appendChild(btns);
+        }
+        card.appendChild(tb);
+      }
+
+      // overrides
+      var det = el('details', 't-ovr');
+      if (tarp.open[key]) det.open = true;
+      det.addEventListener('toggle', function () { tarp.open[key] = det.open; });
+      det.appendChild(el('summary', null, 'Change tarps'));
+      var grid = el('div', 't-grid');
+      grid.appendChild(el('span')); grid.appendChild(el('span', 'gh', 'Light')); grid.appendChild(el('span', 'gh', 'Heavy'));
+      TarpingLog.POSITIONS.forEach(function (p) {
+        grid.appendChild(el('span', 'gl', POS_LABEL[p]));
+        ['L', 'H'].forEach(function (kind) {
+          var sel = el('select');
+          sel.setAttribute('aria-label', POS_LABEL[p] + (kind === 'L' ? ' light' : ' heavy'));
+          sel.setAttribute('data-pos', p + kind);
+          for (var i = 0; i <= 3; i++) { var o = el('option', null, String(i)); o.value = String(i); sel.appendChild(o); }
+          sel.value = String((d.pos[p] || {})[kind] || 0);
+          sel.addEventListener('change', function () {
+            var prev = (d.pos[p] || {})[kind] || 0, v = +sel.value;
+            var c = d.pos[p] || { H: 0, L: 0 };
+            var next = { H: c.H || 0, L: c.L || 0 };
+            next[kind] = v;
+            d.pos[p] = next;
+            var tt = totals(d.pos);
+            if (tt.H > carried.H || tt.L > carried.L) {
+              next[kind] = prev;
+              msg = 'The trailer carries only ' + carried.H + ' heavy and ' + carried.L + ' light tarps.';
+            } else msg = '';
+            if (!(d.pos[p].H || d.pos[p].L)) delete d.pos[p];
+            saveDrafts(); paint(); onChange();
+          });
+          grid.appendChild(sel);
+        });
+      });
+      det.appendChild(grid);
+      det.appendChild(el('div', 't-tot', 'Trailer total: ' + tot.H + ' heavy, ' + tot.L + ' light (carries ' + carried.H + ' heavy, ' + carried.L + ' light)'));
+      var third = tot.H > inv.H;
+      if (third) det.appendChild(el('div', 't-warn', 'A 3rd heavy is your call. Say why below.'));
+      var rl = el('label', 't-reason');
+      rl.appendChild(document.createTextNode(third ? 'Reason (needed for a 3rd heavy)' : 'Reason (optional)'));
+      var ri = el('input');
+      ri.type = 'text'; ri.maxLength = TarpingLog.REASON_MAX; ri.value = d.reason || ''; ri.setAttribute('data-reason', '1');
+      ri.setAttribute('autocomplete', 'off');
+      ri.addEventListener('input', function () { d.reason = ri.value; saveDrafts(); });
+      rl.appendChild(ri);
+      det.appendChild(rl);
+      card.appendChild(det);
+      if (msg) card.appendChild(el('div', 't-warn', msg));
+
+      // confirm
+      var use2 = topUse(t, d), cf = d.conf;
+      var same = !!cf && cf.fin === fin && cf.top === use2 && cf.reason === (d.reason || '').trim().slice(0, TarpingLog.REASON_MAX);
+      var st = el('div', 't-state');
+      if (cf) st.appendChild(el('span', 't-ok', '✓ Logged ' + cf.at + ' · ' + (cf.fin === '-' ? 'no tarps' : cf.fin) + (same ? '' : ' (changed since)')));
+      card.appendChild(st);
+      var cb = el('button', 'tconf', cf ? (same ? 'Confirmed' : 'Confirm again') : 'Confirm');
+      cb.type = 'button';
+      cb.disabled = same;
+      cb.addEventListener('click', function () {
+        var need = totals(d.pos).H > inv.H && !(d.reason || '').trim();
+        if (need) { msg = 'A 3rd heavy needs a reason.'; tarp.open[key] = true; paint(); return; }
+        ensureSender(function () {
+          var tr = t.topRow, ti2 = topInfo(t), use3 = topUse(t, d);
+          try {
+            var e = tlog().addEntry({
+              po: t.po, kill: t.kill, 'catch': t.catch, truck: t.truck, rec: t.layout, fin: TarpingLog.formatLayout(d.pos), reason: d.reason,
+              topRec: ti2 && ti2.has ? 'Y' : 'N', topFin: use3 ? 'Y' : 'N',
+              perCoop: tr ? (use3 ? tr.required : tr.planned) : '',
+              coldF: t.coldF, loc: t.coldAt ? t.coldAt.point : '', hour: t.coldAt ? String(t.coldAt.hour).slice(11, 16) : '',
+              rain: t.rain ? 'Y' : 'N', fc: t.kind === 'Final' ? 'F' : 'P', crewSent: d.crewSent || '',
+              fsWas: t.fsWas ? (t.fsWas.heavy || 0) + 'H' + (t.fsWas.light || 0) + 'L' : '-',
+              dataAt: String(state.data.builtAt || '').slice(0, 16)
+            }, new Date());
+            d.conf = { id: e.id, at: nowHm(), fin: e.f.fin, top: use3, reason: e.f.reason };
+            msg = '';
+            saveDrafts();
+          } catch (err) { msg = 'Could not log this decision: ' + err.message; }
+          paint(); onChange(); tarpBarRefresh();
+        });
+      });
+      card.appendChild(cb);
+    }
+    paint();
+    return card;
+  }
+
+  // ---------- Send log ----------
+  function openMail(url) {
+    var a = document.createElement('a');
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  function ensureSender(next) {
+    var L = tlog();
+    if (L.getSender()) { next(); return; }
+    tarp.panel = { kind: 'sender', next: next };
+    tarpBarRefresh();
+    var p = $('tarppanel');
+    if (p && p.scrollIntoView) p.scrollIntoView({ block: 'center' });
+  }
+  function startBatch(batch) {
+    if (!batch.parts.length) { tarp.panel = { kind: 'info', text: 'Nothing to send.' }; tarpBarRefresh(); return; }
+    tarp.plan = { batch: batch, next: 0 };
+    nextPart();
+  }
+  function nextPart() {
+    var pl = tarp.plan, p = pl.batch.parts[pl.next];
+    pl.next++;
+    tlog().markSent(p.ids, pl.batch.batchId, new Date());   // opened in the mail app; "Resend last 7 days" covers a lost mail
+    tarp.panel = pl.next < pl.batch.parts.length
+      ? { kind: 'part', k: pl.next, m: pl.batch.parts.length }
+      : { kind: 'info', text: 'Mail opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in your mail app.' };
+    tarpBarRefresh();
+    openMail(p.mailto);
+  }
+  function tarpBarRefresh() {
+    var bar = $('tarpbar'), banner = $('tarpbanner');
+    if (!bar || !banner) return;
+    if (!state.data || !tarpActive()) { bar.hidden = true; banner.hidden = true; return; }
+    var L = tlog();
+    if (!tarp.pruned) { tarp.pruned = true; L.prune(new Date()); }
+    var n = L.unsentCount(), red = L.isRed(new Date());
+    bar.hidden = false;
+    bar.textContent = '';
+    var row = el('div', 'tarprow');
+    var send = el('button', 'tsend' + (red ? ' red' : ''), 'Send log (' + n + ')');
+    send.type = 'button'; send.id = 'tarp-send'; send.disabled = n === 0;
+    send.addEventListener('click', function () {
+      ensureSender(function () { startBatch(tlog().buildBatch(tlog().unsent(), new Date())); });
+    });
+    var more = el('button', 'tmore', '⋯');
+    more.type = 'button'; more.id = 'tarp-menu';
+    more.setAttribute('aria-label', 'More log options');
+    more.addEventListener('click', function () {
+      tarp.panel = tarp.panel && tarp.panel.kind === 'menu' ? null : { kind: 'menu' };
+      tarpBarRefresh();
+    });
+    row.appendChild(send); row.appendChild(more);
+    bar.appendChild(row);
+    var pn = tarp.panel;
+    if (pn) {
+      var box = el('div', 'tpanel');
+      box.id = 'tarppanel';
+      if (pn.kind === 'sender') {
+        box.appendChild(el('div', 'tp-q', 'Who is sending the log from this phone? (asked once)'));
+        var slot = tarpSlot(), sn = (state.data.tarping && state.data.tarping.slotNames) || { RN: 'Terry Fountain', HE: 'Amber Avery' };
+        var pref = sn[slot] || '';
+        L.senders.forEach(function (s) {
+          var b = el('button', 'tbtn' + (s === pref ? ' on' : ''), s);
+          b.type = 'button'; b.setAttribute('data-sender', s);
+          b.addEventListener('click', function () { L.setSender(s); var nx = pn.next; tarp.panel = null; tarpBarRefresh(); if (nx) nx(); });
+          box.appendChild(b);
+        });
+      } else if (pn.kind === 'part') {
+        box.appendChild(el('div', 'tp-q', 'Part ' + pn.k + ' of ' + pn.m + ' opened. Send it, then open the next.'));
+        var nb = el('button', 'tsend', 'Send part ' + (pn.k + 1) + ' of ' + pn.m);
+        nb.type = 'button'; nb.id = 'tarp-nextpart';
+        nb.addEventListener('click', nextPart);
+        box.appendChild(nb);
+      } else if (pn.kind === 'menu') {
+        var rs = el('button', 'tbtn', 'Resend last 7 days');
+        rs.type = 'button'; rs.id = 'tarp-resend';
+        rs.addEventListener('click', function () {
+          ensureSender(function () { tarp.panel = null; startBatch(tlog().resendBatch(new Date())); });
+        });
+        box.appendChild(rs);
+        var who = L.getSender();
+        var ch = el('button', 'tbtn', who ? 'Sender: ' + who + ' (change)' : 'Choose sender');
+        ch.type = 'button';
+        ch.addEventListener('click', function () { tarp.panel = { kind: 'sender', next: null }; tarpBarRefresh(); });
+        box.appendChild(ch);
+      } else {
+        box.appendChild(el('div', 'tp-q', pn.text));
+      }
+      if (pn.kind !== 'part') {
+        var x = el('button', 'tbtn quiet', 'Close');
+        x.type = 'button';
+        x.addEventListener('click', function () { tarp.panel = null; tarpBarRefresh(); });
+        box.appendChild(x);
+      }
+      bar.appendChild(box);
+    }
+    banner.hidden = !red;
+    if (red) banner.textContent = 'Tarping log: ' + n + (n === 1 ? ' decision' : ' decisions') + ' not sent for over 12 hours. Tap Send log.';
+    syncSticky();
+  }
+  function tarpStart() {
+    if (tarp.timer) return;
+    tarp.timer = setInterval(function () { if (state.data) tarpBarRefresh(); }, 60000);
+  }
+
   // ---------- sticky offsets ----------
   function syncSticky() {
     var h = $('hdr').offsetHeight;
@@ -938,6 +1449,8 @@
     if (document.visibilityState === 'visible' && Date.now() - state.lastFetch > REFETCH_MS) load(false);
   });
   window.addEventListener('resize', syncSticky);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && state.data) tarpBarRefresh(); });
+  tarpStart();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {

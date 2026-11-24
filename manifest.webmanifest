@@ -1,6 +1,6 @@
 {
-  "name": "Tip Top Live Schedule",
-  "short_name": "Live Schedule",
+  "name": "Tip Top Live Ops",
+  "short_name": "Live Ops",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
