@@ -1081,8 +1081,9 @@
       var name = ((S.positions || {})[TarpingLog.POSITION_NAMES[k]] || {})[lang] || TarpingLog.POSITION_NAMES[k];
       [['H', c.H, S.heavy], ['L', c.L, S.light]].forEach(function (x) {
         if (!x[1]) return;
-        var w = lang === 'en' ? x[2].en : (x[1] > 1 ? x[2].esPlural || x[2].es : x[2].es);
-        out.push(lang === 'en' ? x[1] + w + ' ' + name : x[1] + ' ' + w + ' ' + name);
+        // words, not H / L (Curt 2026-11-25: "show light or heavy for planning")
+        var w = lang === 'en' ? (x[0] === 'H' ? 'heavy' : 'light') : (x[1] > 1 ? x[2].esPlural || x[2].es : x[2].es);
+        out.push(x[1] + ' ' + w + ' ' + name);
       });
     });
     return out.length ? out.join(' / ') : S.none[lang];
@@ -1094,20 +1095,89 @@
     var d = new Date(Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)));
     return DIAS[d.getUTCDay()] + ' ' + (+s.slice(5, 7)) + '/' + (+s.slice(8, 10));
   }
+  // ---- crew wording (Curt 2026-11-25): tarps named by their COLOR at the PO's plant, loads grouped,
+  // in the words the crews already get from Terry: "Double yellow or grey tarp 3 & 4th load.
+  // Triple yellow or grey tarp 5 & 6th load. 8 per coop leave top empty." Loads with no tarp are not listed.
+  function cap1(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+  // the plant's tarp colors, null for a plant without a color list (then only "light" / "heavy" is said)
+  function crewColors(po, lang) {
+    var C = state.data.tarping.rules.sms.colors || {}, c = C[po.plant] || {};
+    return { L: (c.light || {})[lang] || null, H: (c.heavy || {})[lang] || null };
+  }
+  // one truck's tarps in crew words, null when the truck gets no tarp
+  function crewSetup(pos, po, lang) {
+    var W = state.data.tarping.rules.sms.crew[lang], col = crewColors(po, lang);
+    var g = function (k) { var c = pos[k] || {}; return { H: c.H || 0, L: c.L || 0 }; };
+    var D = g('D'), P = g('P'), T = g('T'), F = g('F'), R = g('R');
+    var nH = D.H + P.H + T.H + F.H + R.H, nL = D.L + P.L + T.L + F.L + R.L;
+    if (!nH && !nL) return null;
+    // "double light tarp (yellow or grey)" / "doble lona ligera (amarilla o gris)" - type AND colors (Curt 2026-11-25)
+    var noun = function (type, count) {
+      var c = count === 2 ? W.double + ' ' : count === 3 ? W.triple + ' ' : '';
+      var colors = col[type] ? ' (' + col[type] + ')' : '';
+      return c + (lang === 'es' ? W.tarp + ' ' + W[type] : W[type] + ' ' + W.tarp) + colors;
+    };
+    // the crews' shorthand when all tarps are one type: Double = one each side, Triple = each side + one on top
+    var one = nH && !nL ? 'H' : !nH && nL ? 'L' : null;
+    if (one && !F[one] && !R[one] && D[one] === 1 && P[one] === 1 && T[one] <= 1) return cap1(noun(one, T[one] ? 3 : 2));
+    // anything else: position by position, joined with " + "
+    var parts = [];
+    if (D.H === 1 && P.H === 1 && !D.L && !P.L) { parts.push(noun('H', 0) + ' ' + W.bothSides); D = { H: 0, L: 0 }; P = { H: 0, L: 0 }; }
+    else if (D.L === 1 && P.L === 1 && !D.H && !P.H) { parts.push(noun('L', 0) + ' ' + W.bothSides); D = { H: 0, L: 0 }; P = { H: 0, L: 0 }; }
+    [['D', D], ['P', P], ['T', T], ['F', F], ['R', R]].forEach(function (x) {
+      if (x[1].H) parts.push(noun('H', x[1].H) + ' ' + W.pos[x[0]]);
+      if (x[1].L) parts.push(noun('L', x[1].L) + ' ' + W.pos[x[0]]);
+    });
+    return cap1(parts.join(' + '));
+  }
+  // truck numbers -> "3 & 4th load" / "last 2" / "all loads" ("cargas 3 y 4" / "últimas 2" / "todas las cargas")
+  function crewLoads(nums, total, lang) {
+    var W = state.data.tarping.rules.sms.crew[lang];
+    nums = nums.slice().sort(function (a, b) { return a - b; });
+    if (total && nums.length === total) return W.allLoads;
+    var run = nums.every(function (n, i) { return i === 0 || n === nums[i - 1] + 1; });
+    if (total && run && nums[nums.length - 1] === total) return nums.length === 1 ? W.lastOne : fillT(W.lastN, { n: nums.length });
+    if (lang === 'es') return (nums.length === 1 ? W.load + ' ' + nums[0] : W.loads + ' ' + nums.slice(0, -1).join(', ') + ' ' + W.and + ' ' + nums[nums.length - 1]);
+    var last = nums[nums.length - 1], sfx = (last % 100 >= 11 && last % 100 <= 13) ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[last % 10] || 'th');
+    return (nums.length === 1 ? '' : nums.slice(0, -1).join(', ') + ' ' + W.and + ' ') + last + sfx + ' ' + W.load;
+  }
+  // the farm's state from the GROWER CARD address (po.address: 7.0 ALL POs grower columns, Active Growers fallback),
+  // e.g. "692 HENDRICKS LANE, SCOTTSVILLE, KY 42164"; the forecast's farm location only when the card has none
+  function farmState(po, list) {
+    var m = /,\s*([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$/.exec(String(po.address || '').trim());
+    if (m) return m[1];
+    var f = (list[0].t.points || []).filter(function (p) { return p.name === 'farm'; })[0];
+    m = f && /,\s*([A-Z]{2})\b/.exec(f.label || '');
+    return m ? m[1] : '';
+  }
   // list = [{ t, d }] for the PO's trucks that have a recommendation
   function smsBody(po, list) {
     var S = state.data.tarping.rules.sms;
+    var total = +(list[0].t.of || po.trucks || 0) || list.length;
     function block(lang) {
-      var f = list[0].t, cd = f.catch || po.catch;
-      var lines = [fillT(S.header[lang], { grower: po.grower || '', po: po.id, 'catch': lang === 'es' ? dayEs(cd) : fmtDay(cd) })];
-      list.forEach(function (x) {
-        lines.push(fillT(S.truck[lang], { n: x.t.truck, setup: setupText(x.d.pos, lang) }));
-        if (topUse(x.t, x.d)) lines.push('  ' + fillT(S.topRow[lang], { n: x.t.topRow.required }));
+      var W = S.crew[lang], f = list[0].t, cd = f.catch || po.catch;
+      var lines = [fillT((S.crewHeader || S.header)[lang], { grower: po.grower || '', state: farmState(po, list), po: po.id, 'catch': lang === 'es' ? dayEs(cd) : fmtDay(cd) }).replace(/,\s*(?=\s-\s)/, '').replace(/\s+-\s*$/, '').replace(/\s{2,}/g, ' ')];
+      // trucks with the same tarps and the same top-row line share one line, in truck order
+      var groups = [], byKey = {};
+      list.slice().sort(function (a, b) { return a.t.truck - b.t.truck; }).forEach(function (x) {
+        var s = crewSetup(x.d.pos, po, lang), top = topUse(x.t, x.d) ? x.t.topRow.required : null;
+        if (!s && !top) return;
+        var key = (s || '-') + '|' + (top || '');
+        if (!byKey[key]) { byKey[key] = { s: s, top: top, nums: [] }; groups.push(byKey[key]); }
+        byKey[key].nums.push(x.t.truck);
       });
-      lines.push(S.footer[lang]);
-      return lines.join('\n');
+      if (!groups.length) lines.push(W.noTarp);
+      groups.forEach(function (gr) {
+        var s = gr.s || W.noTarpShort;
+        var line = s + (s.indexOf(' + ') >= 0 ? ', ' : ' ') + crewLoads(gr.nums, total, lang) + '.';
+        if (gr.top) line += ' ' + fillT(W.topRow, { n: gr.top });
+        lines.push(line);
+      });
+      // a blank line below the header and between the load groups (Curt 2026-11-25); no footer
+      return lines.join('\n\n');
     }
-    return block('en') + '\n\n' + block('es');
+    // a row of dashes between the English and the Spanish (Curt 2026-11-25)
+    return S.spanish === false ? block('en') : block('en') + '\n\n---------------\n\n' + block('es');
   }
 
   // ---------- the section inside a PO ----------
