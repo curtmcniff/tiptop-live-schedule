@@ -942,14 +942,16 @@
     return !!(T && s && window.TarpingLog && Array.isArray(T.slots) && T.slots.indexOf(s) !== -1 && T.rules && T.trucks);
   }
   function tarpStore() { try { return window.localStorage; } catch (e) { return null; } }
-  // Which app Send log opens, per phone (v14, Curt 2026-11-25): 'mail' = the phone's default mail app (mailto:),
-  // 'outlook' = the Outlook app (ms-outlook://compose). Outlook sends from the company account; the pickup flow only
+  // Which app Send log opens, per phone (v14, Curt 2026-11-25): 'outlook' = the Outlook app (ms-outlook://compose),
+  // 'mail' = the phone's default mail app (mailto:). Outlook sends from the company account; the pickup flow only
   // takes Send-log mail from company addresses, and an iPhone's Mail app often holds a personal one.
+  // v15 (Curt 2026-11-25): Outlook is the default; after an Outlook open the panel offers "Use Mail app" for the same
+  // mail (a page cannot tell whether Outlook is installed). Only the ⋯ menu changes the stored choice.
   var TARP_MAILAPP = 'ttls.tarp.mailapp';
   function tarpMailApp() {
     var v = null;
     try { v = localStorage.getItem(TARP_MAILAPP); } catch (e) { v = null; }
-    return v === 'outlook' ? 'outlook' : 'mail';
+    return v === 'mail' ? 'mail' : 'outlook';
   }
   function setTarpMailApp(v) {
     try { localStorage.setItem(TARP_MAILAPP, v === 'outlook' ? 'outlook' : 'mail'); } catch (e) { /* private mode: default mail app */ }
@@ -1378,9 +1380,9 @@
     pl.next++;
     tlog().markSent(p.ids, pl.batch.batchId, new Date());   // opened in the mail app; "Resend last 7 days" covers a lost mail
     tarp.panel = pl.next < pl.batch.parts.length
-      ? { kind: 'part', k: pl.next, m: pl.batch.parts.length }
-      : { kind: 'info', text: ol
-        ? 'Outlook opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in Outlook. If Outlook did not open: ⋯ → Send with: Mail app, then Resend last 7 days.'
+      ? { kind: 'part', k: pl.next, m: pl.batch.parts.length, fallback: ol ? p : null }
+      : { kind: 'info', fallback: ol ? p : null, text: ol
+        ? 'Outlook opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in Outlook.'
         : 'Mail opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in your mail app.' };
     tarpBarRefresh();
     openMail(ol ? p.outlook : p.mailto);
@@ -1451,6 +1453,19 @@
         box.appendChild(ch);
       } else {
         box.appendChild(el('div', 'tp-q', pn.text));
+      }
+      if (pn.fallback && (pn.kind === 'part' || pn.kind === 'info')) {
+        // same mail through the phone's default mail app; the stored choice stays as it is
+        var fb = el('button', 'tbtn', 'Outlook did not open? Use Mail app');
+        fb.type = 'button'; fb.id = 'tarp-fallback';
+        fb.addEventListener('click', function () {
+          var fp = pn.fallback;
+          pn.fallback = null;
+          if (pn.kind === 'info') pn.text = 'Mail app opened. Send it from your company email address (other addresses are not picked up). To use the Mail app every time: ⋯ → Send with: Mail app.';
+          tarpBarRefresh();
+          openMail(fp.mailto);
+        });
+        box.appendChild(fb);
       }
       if (pn.kind !== 'part') {
         var x = el('button', 'tbtn quiet', 'Close');
