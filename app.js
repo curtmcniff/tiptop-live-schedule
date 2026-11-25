@@ -784,7 +784,6 @@
     row('PO', dash(po.id));
     row('Kill', fmtDay(po.kill));
     row('Catch', po.catch ? fmtDay(po.catch) + (po.catchTime ? ' ' + po.catchTime : '') : '—');
-    row('Pack', po.pack ? fmtDay(po.pack) + (po.packEst ? ' (est.)' : '') : '—');
     row('Houses', dash(po.houses));
     row('Head', fmtNum(po.head));
     row('Plant', dash(po.plant) + (po.type && po.type !== 'Standard' ? ' (' + po.type + ')' : ''));
