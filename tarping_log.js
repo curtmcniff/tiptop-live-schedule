@@ -217,6 +217,15 @@
       if (st.entries.length !== before) save(st);
       return before - st.entries.length;
     }
+    // deletes entries from this phone only (Curt 2026-11-25; the app asks twice first). Entries already emailed stay
+    // in the office log; an unsent entry deleted here never reaches it. Returns the number deleted.
+    function removeEntries(ids) {
+      ids = Array.isArray(ids) ? ids : [];
+      var st = load(), before = st.entries.length;
+      st.entries = st.entries.filter(function (en) { return ids.indexOf(en.id) === -1; });
+      if (st.entries.length !== before) save(st);
+      return before - st.entries.length;
+    }
     // every entry of the last 7 days, sent or not, as a new batch (same entry ids; the master dedupes)
     function resendBatch(now) {
       now = now || new Date();
@@ -227,7 +236,7 @@
     return {
       senders: senders.slice(), getSender: getSender, setSender: setSender, addEntry: addEntry, entries: entries,
       unsent: unsent, unsentCount: unsentCount, isRed: isRed, setCrewSent: setCrewSent, buildBatch: buildBatch,
-      markSent: markSent, prune: prune, resendBatch: resendBatch
+      markSent: markSent, prune: prune, resendBatch: resendBatch, removeEntries: removeEntries
     };
   }
 

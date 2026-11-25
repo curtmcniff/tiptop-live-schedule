@@ -1456,6 +1456,79 @@
     tarpBarRefresh();
     openMail(ol ? p.outlook : p.mailto);
   }
+  // ---------- delete log entries (Curt 2026-11-25: "ask twice before deleting") ----------
+  // From the ⋯ menu: the entries kept on this phone, newest first, one Delete each plus Delete all. Every delete asks
+  // two questions; the second says how many of them were never emailed. Deleting touches this phone only.
+  function logSetup(e) {
+    var p = TarpingLog.parseLayout(e.f.fin || '-');
+    return p.ok ? setupText(p.positions, 'en') : String(e.f.fin || '');
+  }
+  function loggedAt(e) {
+    var s = TarpingLog.isoMin(new Date(e.ts));
+    return fmtDay(s.slice(0, 10)) + ' ' + clock12(s.slice(11));
+  }
+  // a truck whose logged decision was deleted falls back to its newest remaining entry, or to Confirm when none is left
+  function tarpDelete(ids) {
+    var L = tlog(), c = L.removeEntries(ids), left = L.entries(), all = allDrafts(), changed = false;
+    Object.keys(all).forEach(function (k) {
+      var d = all[k];
+      if (!d || !d.conf || ids.indexOf(d.conf.id) === -1) return;
+      var key = k.split('|'), prev = null;
+      left.forEach(function (e) { if (e.f.po === key[0] && String(e.f.truck) === key[1]) prev = e; }); // oldest first: last = newest
+      d.conf = prev ? { id: prev.id, at: TarpingLog.isoMin(new Date(prev.ts)).slice(11), fin: prev.f.fin, top: prev.f.topFin === 'Y', reason: prev.f.reason } : null;
+      changed = true;
+    });
+    if (changed) saveDrafts();
+    return c;
+  }
+  function buildDeletePanel(box, pn, L) {
+    var list = L.entries().reverse(), unsent = {};
+    list.forEach(function (e) { if (!e.sentAt) unsent[e.id] = true; });
+    var ask = pn.ask;
+    if (ask) {
+      var nu = ask.ids.filter(function (id) { return unsent[id]; }).length;
+      box.appendChild(el('div', 'tp-q', ask.stage === 1
+        ? 'Delete ' + ask.what + '?'
+        : 'Are you sure? ' + cap1(ask.what) + ' will be deleted from this phone and cannot be brought back.' +
+          (nu ? ' ' + nu + (nu === 1 ? ' entry was' : ' entries were') + ' never emailed and will not reach the office.' : '')));
+      var yes = el('button', 'tbtn danger', ask.stage === 1 ? 'Yes, delete' : 'Delete for good');
+      yes.type = 'button'; yes.id = ask.stage === 1 ? 'tarp-del-yes1' : 'tarp-del-yes2';
+      yes.addEventListener('click', function () {
+        if (ask.stage === 1) { ask.stage = 2; tarpBarRefresh(); return; }
+        var c = tarpDelete(ask.ids);
+        tarp.panel = { kind: 'info', text: 'Deleted ' + c + (c === 1 ? ' log entry' : ' log entries') + ' from this phone.' };
+        render(); // truck cards show the change
+      });
+      var no = el('button', 'tbtn', 'Cancel');
+      no.type = 'button'; no.id = 'tarp-del-no';
+      no.addEventListener('click', function () { pn.ask = null; tarpBarRefresh(); });
+      box.appendChild(yes); box.appendChild(no);
+      return;
+    }
+    if (!list.length) { box.appendChild(el('div', 'tp-q', 'No log entries on this phone.')); return; }
+    box.appendChild(el('div', 'tp-q', 'Log entries on this phone (' + list.length + '). Deleting removes them from this phone only; entries already emailed stay in the office log.'));
+    list.forEach(function (e) {
+      var r = el('div', 'tdel-row'), txt = el('div', 'tdel-t');
+      txt.appendChild(el('div', 'tdel-l1', e.f.po + ' · truck ' + e.f.truck + ' · catch ' + fmtDay(e.f['catch'])));
+      txt.appendChild(el('div', 'tdel-l2', logSetup(e) + ' · logged ' + loggedAt(e) + (e.sentAt ? ' · emailed' : ' · not emailed yet')));
+      var b = el('button', 'tbtn', 'Delete');
+      b.type = 'button'; b.setAttribute('data-del', e.id);
+      b.addEventListener('click', function () {
+        pn.ask = { ids: [e.id], what: 'the entry for ' + e.f.po + ' truck ' + e.f.truck + ' (logged ' + loggedAt(e) + ')', stage: 1 };
+        tarpBarRefresh();
+      });
+      r.appendChild(txt); r.appendChild(b);
+      box.appendChild(r);
+    });
+    var da = el('button', 'tbtn danger', 'Delete all (' + list.length + ')');
+    da.type = 'button'; da.id = 'tarp-delall';
+    da.addEventListener('click', function () {
+      pn.ask = { ids: list.map(function (e) { return e.id; }), what: 'all ' + list.length + ' log ' + (list.length === 1 ? 'entry' : 'entries') + ' on this phone', stage: 1 };
+      tarpBarRefresh();
+    });
+    box.appendChild(da);
+  }
+
   function tarpBarRefresh() {
     var bar = $('tarpbar'), banner = $('tarpbanner');
     if (!bar || !banner) return;
@@ -1507,6 +1580,10 @@
           ensureSender(function () { tarp.panel = null; startBatch(tlog().resendBatch(new Date())); });
         });
         box.appendChild(rs);
+        var dm = el('button', 'tbtn', 'Delete log entries');
+        dm.type = 'button'; dm.id = 'tarp-delmenu';
+        dm.addEventListener('click', function () { tarp.panel = { kind: 'delete', ask: null }; tarpBarRefresh(); });
+        box.appendChild(dm);
         var app = tarpMailApp();
         box.appendChild(el('div', 'tp-q', 'Send with (this phone):'));
         [['mail', 'Mail app'], ['outlook', 'Outlook']].forEach(function (o) {
@@ -1520,6 +1597,8 @@
         ch.type = 'button';
         ch.addEventListener('click', function () { tarp.panel = { kind: 'sender', next: null }; tarpBarRefresh(); });
         box.appendChild(ch);
+      } else if (pn.kind === 'delete') {
+        buildDeletePanel(box, pn, L);
       } else {
         box.appendChild(el('div', 'tp-q', pn.text));
       }
@@ -1563,7 +1642,7 @@
   }
 
   // ---------- wiring ----------
-  $('refresh').addEventListener('click', function () { load(true); });
+  $('refresh').addEventListener('click', function () { load(true); swCheck(); });
   $('search').addEventListener('input', function (e) {
     state.query = e.target.value;
     render();
@@ -1599,9 +1678,26 @@
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible' && state.data) tarpBarRefresh(); });
   tarpStart();
 
+  // New app versions (v18, Curt 2026-11-25: "the iPhone app didn't update"): an iPhone keeps the app open in the
+  // background for days and only looked for a new version on a cold start. Now the ↻ button and every return to the
+  // app check for one; when the new version takes over, the page reloads once - right away, or when the app is next
+  // put away if a panel is open or a field is being typed in.
+  var swReg = null, swReloaded = false, swPending = false;
+  function swCheck() { if (swReg && swReg.update) swReg.update().catch(function () {}); }
+  function swReload() { if (swReloaded) return; swReloaded = true; location.reload(); }
   if ('serviceWorker' in navigator) {
+    var hadSw = !!navigator.serviceWorker.controller; // first visit: the worker takes control, nothing to reload
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadSw) return;
+      var a = document.activeElement, typing = !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+      if (tarp.panel || typing) swPending = true; else swReload();
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden' && swPending) swReload();
+      else if (document.visibilityState === 'visible') swCheck();
+    });
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('./sw.js').catch(function () {});
+      navigator.serviceWorker.register('./sw.js').then(function (r) { swReg = r; }).catch(function () {});
     });
   }
 
