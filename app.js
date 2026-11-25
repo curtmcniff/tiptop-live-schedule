@@ -942,6 +942,18 @@
     return !!(T && s && window.TarpingLog && Array.isArray(T.slots) && T.slots.indexOf(s) !== -1 && T.rules && T.trucks);
   }
   function tarpStore() { try { return window.localStorage; } catch (e) { return null; } }
+  // Which app Send log opens, per phone (v14, Curt 2026-11-25): 'mail' = the phone's default mail app (mailto:),
+  // 'outlook' = the Outlook app (ms-outlook://compose). Outlook sends from the company account; the pickup flow only
+  // takes Send-log mail from company addresses, and an iPhone's Mail app often holds a personal one.
+  var TARP_MAILAPP = 'ttls.tarp.mailapp';
+  function tarpMailApp() {
+    var v = null;
+    try { v = localStorage.getItem(TARP_MAILAPP); } catch (e) { v = null; }
+    return v === 'outlook' ? 'outlook' : 'mail';
+  }
+  function setTarpMailApp(v) {
+    try { localStorage.setItem(TARP_MAILAPP, v === 'outlook' ? 'outlook' : 'mail'); } catch (e) { /* private mode: default mail app */ }
+  }
   function tlog() {
     var T = state.data.tarping;
     if (!tarp.log || tarp.logTo !== T.mailTo) {
@@ -1362,14 +1374,16 @@
     nextPart();
   }
   function nextPart() {
-    var pl = tarp.plan, p = pl.batch.parts[pl.next];
+    var pl = tarp.plan, p = pl.batch.parts[pl.next], ol = tarpMailApp() === 'outlook' && p.outlook;
     pl.next++;
     tlog().markSent(p.ids, pl.batch.batchId, new Date());   // opened in the mail app; "Resend last 7 days" covers a lost mail
     tarp.panel = pl.next < pl.batch.parts.length
       ? { kind: 'part', k: pl.next, m: pl.batch.parts.length }
-      : { kind: 'info', text: 'Mail opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in your mail app.' };
+      : { kind: 'info', text: ol
+        ? 'Outlook opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in Outlook. If Outlook did not open: ⋯ → Send with: Mail app, then Resend last 7 days.'
+        : 'Mail opened with ' + pl.batch.n + (pl.batch.n === 1 ? ' entry' : ' entries') + '. Press send in your mail app.' };
     tarpBarRefresh();
-    openMail(p.mailto);
+    openMail(ol ? p.outlook : p.mailto);
   }
   function tarpBarRefresh() {
     var bar = $('tarpbar'), banner = $('tarpbanner');
@@ -1381,7 +1395,7 @@
     bar.hidden = false;
     bar.textContent = '';
     var row = el('div', 'tarprow');
-    var send = el('button', 'tsend' + (red ? ' red' : ''), 'Send log (' + n + ')');
+    var send = el('button', 'tsend' + (red ? ' red' : ''), (tarpMailApp() === 'outlook' ? 'Send log in Outlook (' : 'Send log (') + n + ')');
     send.type = 'button'; send.id = 'tarp-send'; send.disabled = n === 0;
     send.addEventListener('click', function () {
       ensureSender(function () { startBatch(tlog().buildBatch(tlog().unsent(), new Date())); });
@@ -1422,6 +1436,14 @@
           ensureSender(function () { tarp.panel = null; startBatch(tlog().resendBatch(new Date())); });
         });
         box.appendChild(rs);
+        var app = tarpMailApp();
+        box.appendChild(el('div', 'tp-q', 'Send with (this phone):'));
+        [['mail', 'Mail app'], ['outlook', 'Outlook']].forEach(function (o) {
+          var mb = el('button', 'tbtn' + (app === o[0] ? ' on' : ''), o[1]);
+          mb.type = 'button'; mb.setAttribute('data-mailapp', o[0]);
+          mb.addEventListener('click', function () { setTarpMailApp(o[0]); tarpBarRefresh(); });
+          box.appendChild(mb);
+        });
         var who = L.getSender();
         var ch = el('button', 'tbtn', who ? 'Sender: ' + who + ' (change)' : 'Choose sender');
         ch.type = 'button';

@@ -189,9 +189,13 @@
         var body = ['TARPLOG v' + VERSION + ' batch=' + batchId + ' part=' + k + '/' + m + ' entries=' + g.length + '/' + n + ' sender=' + sender, HEADER]
           .concat(g.map(function (i) { return lines[i]; }), ['END batch=' + batchId + ' part=' + k + '/' + m]).join('\r\n');
         var subject = subj + (m > 1 ? ' part ' + k + ' of ' + m : '');
+        var q = '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
         return {
           k: k, m: m, subject: subject, body: body,
-          mailto: 'mailto:' + to + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body),
+          mailto: 'mailto:' + to + q,
+          // the same mail opened straight in the Outlook app (its compose link), for phones whose default mail app
+          // holds a personal account: the flow only takes Send-log mail from company addresses (2026-11-25)
+          outlook: 'ms-outlook://compose?to=' + to + q.replace('?', '&'),
           ids: g.map(function (i) { return list[i].id; })
         };
       });
