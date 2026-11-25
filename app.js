@@ -233,6 +233,7 @@
     // same copy as on screen: only refresh the banners, so open rows stay open
     var same = !first && state.data.builtAt === d.builtAt && state.data.asOf === d.asOf;
     state.data = d;
+    tarpApplyLive(); // a newer forecast fetched by this phone stays on the trucks (v19)
     state.locked = false;
     state.offline = fromCache;
     state.lastFetch = Date.now();
@@ -269,6 +270,7 @@
       .then(function () {
         state.loading = false;
         $('refresh').classList.remove('spin');
+        if (state.data) tarpLiveWeather(!!manual); // ↻ always asks; opening the app at most every 30 min
       });
   }
 
@@ -746,6 +748,7 @@
 
   function buildPo(po) {
     var node = el('div', 'po');
+    node.setAttribute('data-po', po.id); // the phone's forecast repaints an open PO in place (v19)
     var btn = el('button', 'po-head');
     btn.type = 'button';
     btn.setAttribute('aria-expanded', 'false');
@@ -977,6 +980,159 @@
     return tarp.idx[po.id] || [];
   }
 
+  // ---------- live forecast on the phone (v19, Curt 2026-11-25) ----------
+  // Terry sets Sunday-night tarps on Sunday morning, when no app build may have run (builds need the office laptop).
+  // So the phone asks Open-Meteo itself - the same service and request the build makes: farm / midpoint / plant
+  // coordinates rounded to 2 decimals plus dates, nothing else - and runs the same rules file (tarp_engine.js, an
+  // identical copy of tarping\engine.js) over each truck's window. On app open and on ↻ (open: at most every 30 min);
+  // trucks whose window has ended keep the build's forecast; any failure keeps the build's forecast and says so.
+  var WX_URL = 'https://api.open-meteo.com/v1/forecast', WX_EVERY_MS = 30 * 60000, WX_BATCH = 50, WX_TIMEOUT_MS = 15000;
+  function tarpClock() {
+    if (isLocalHost()) { // test override, this PC only: ?now=yyyy-mm-ddThh:mm (Georgia time)
+      var q = /[?&]now=(\d{4}-\d\d-\d\dT\d\d:\d\d)(?:&|$)/.exec(location.search);
+      if (q) return { local: q[1], date: q[1].slice(0, 10), iso: q[1] + ':00-05:00' };
+    }
+    return window.TarpEngine.gaNow(new Date());
+  }
+  function wxKey(p) { return Number(p.lat).toFixed(2) + ',' + Number(p.lon).toFixed(2); }
+  function liveCandidates(E, T, clock) {
+    var out = [], last = E.addDays(clock.date, 15); // Open-Meteo forecasts 16 days
+    Object.keys(T.trucks).forEach(function (k) {
+      var t = T.trucks[k], w = t && t.window;
+      if (!w || !w.start || !w.end || w.end <= clock.local || w.end.slice(0, 10) > last) return;
+      var pts = (t.points || []).filter(function (p) { return p && typeof p.lat === 'number' && typeof p.lon === 'number'; });
+      if (!pts.some(function (p) { return p.name === 'farm'; })) return; // as in the build: no farm, no forecast
+      out.push({ k: k, t: t, pts: pts });
+    });
+    return out;
+  }
+  function wxFetch(coords, start, end) {
+    var url = WX_URL + '?latitude=' + coords.map(function (c) { return c.lat.toFixed(2); }).join(',') +
+      '&longitude=' + coords.map(function (c) { return c.lon.toFixed(2); }).join(',') +
+      '&hourly=temperature_2m,precipitation_probability&temperature_unit=fahrenheit&timezone=America%2FNew_York' +
+      '&start_date=' + start + '&end_date=' + end;
+    var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, WX_TIMEOUT_MS) : null;
+    var done = function () { if (timer) clearTimeout(timer); };
+    return fetch(url, ctl ? { cache: 'no-store', signal: ctl.signal } : { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) {
+        done();
+        var arr = Array.isArray(j) ? j : [j]; // one place: an object; several: a list in the order asked
+        if (arr.length !== coords.length) throw new Error('forecast for ' + arr.length + ' of ' + coords.length + ' places');
+        return arr.map(function (x) {
+          var h = x && x.hourly;
+          return h && Array.isArray(h.time) ? { time: h.time, temperature_2m: h.temperature_2m, precipitation_probability: h.precipitation_probability } : null;
+        });
+      }, function (e) { done(); throw e; });
+  }
+  // the fields the build's forecast sets, recomputed exactly as tarping\run.js does
+  function liveTruck(E, rules, c, wx, clock) {
+    var used = [];
+    c.pts.forEach(function (p) { var w = wx[wxKey(p)]; if (w) used.push({ name: p.name, label: p.label, src: p.src, lat: p.lat, lon: p.lon, weather: w }); });
+    if (!used.length) return null;
+    var a = E.analyzeWeather(rules, c.t.window, used);
+    if (!a) return null;
+    var rec = E.recommend(rules, a), heads = c.t.heads || (c.t.topRow && c.t.topRow.heads) || null;
+    return {
+      kind: c.t['catch'] <= clock.date ? 'Final' : 'Preview', runAt: clock.iso, live: true,
+      points: (c.t.points || []).map(function (p) {
+        var st = (a.points || []).filter(function (x) { return x.name === p.name; })[0], o = {};
+        Object.keys(p).forEach(function (x) { o[x] = p[x]; });
+        o.lowF = st ? st.lowF : null; o.lowAt = st ? st.lowAt : null; o.highF = st ? st.highF : null; o.rainPct = st ? st.rainPct : null;
+        return o;
+      }),
+      coldF: a.coldF, coldAt: a.coldAt, highF: a.highF, rainPct: a.rainPct, rain: a.rain,
+      category: rec.category, condition: rec.condition, rec: rec.rec, layout: rec.layout, text: rec.text, note: rec.note,
+      warmDrop: rec.warmDrop, topRow: rec.topRowCheck ? E.topRow(rules, heads) : null,
+      problems: (c.t.problems || []).filter(function (s) { return !/^weather missing|^no weather hours/.test(s); })
+    };
+  }
+  // puts the phone's forecast on the trucks of the data on screen (every data load replaces the trucks)
+  function tarpApplyLive() {
+    var T = state.data && state.data.tarping, L = tarp.live, n = 0;
+    if (!T || !T.trucks || !L) return 0;
+    Object.keys(L.trucks).forEach(function (k) {
+      var t = T.trucks[k], f = L.trucks[k];
+      if (!t || !t.window || t.window.start !== f.wStart || t.window.end !== f.wEnd) return; // truck moved: the build's forecast stands
+      if (!t.live && String(t.runAt || '') > String(f.fields.runAt)) return;                  // a newer build forecast
+      Object.keys(f.fields).forEach(function (x) { t[x] = f.fields[x]; });
+      n++;
+    });
+    return n;
+  }
+  // rebuilds the tarping part of every PO already opened, so open POs stay open
+  function tarpRepaintOpen() {
+    if (!state.data || !tarpActive()) return;
+    var byId = {};
+    (state.data.pos || []).forEach(function (p) { byId[p.id] = p; });
+    [].forEach.call(document.querySelectorAll('.po[data-po] .po-body'), function (body) {
+      var po = byId[body.parentNode.getAttribute('data-po')], old = body.querySelector('.tarp');
+      if (!po || !old) return;
+      var fresh = buildTarping(po);
+      if (fresh) old.parentNode.replaceChild(fresh, old);
+    });
+  }
+  function tarpLiveWeather(force) {
+    var E = window.TarpEngine, T = state.data && state.data.tarping;
+    if (!E || !T || !T.trucks || !T.rules || tarp.wxBusy || !tarpActive()) return;
+    if (!force && tarp.live && Date.now() - tarp.live.at < WX_EVERY_MS) return;
+    var clock = tarpClock(), cands = liveCandidates(E, T, clock);
+    if (!cands.length) return;
+    var need = {}, keys = [], start = null, end = null;
+    cands.forEach(function (c) {
+      c.pts.forEach(function (p) {
+        var k = wxKey(p);
+        if (!need[k]) { need[k] = { lat: Number(p.lat), lon: Number(p.lon) }; keys.push(k); }
+      });
+      var s = c.t.window.start.slice(0, 10), e = c.t.window.end.slice(0, 10);
+      if (!start || s < start) start = s;
+      if (!end || e > end) end = e;
+    });
+    var batches = [];
+    for (var i = 0; i < keys.length; i += WX_BATCH) batches.push(keys.slice(i, i + WX_BATCH));
+    tarp.wxBusy = true; tarp.wxNote = { state: 'busy' };
+    tarpBarRefresh();
+    Promise.all(batches.map(function (b) {
+      return wxFetch(b.map(function (k) { return need[k]; }), start, end).then(function (res) {
+        var o = {};
+        b.forEach(function (k, j) { if (res[j]) o[k] = res[j]; });
+        return o;
+      });
+    })).then(function (parts) {
+      var wx = {}, live = { at: Date.now(), trucks: {} }, n = 0;
+      parts.forEach(function (o) { Object.keys(o).forEach(function (k) { wx[k] = o[k]; }); });
+      cands.forEach(function (c) {
+        var f = null;
+        try { f = liveTruck(E, T.rules, c, wx, clock); } catch (e) { f = null; }
+        if (f) { live.trucks[c.k] = { wStart: c.t.window.start, wEnd: c.t.window.end, fields: f }; n++; }
+      });
+      if (!n) throw new Error('no forecast hours for the trucks');
+      tarp.live = live;
+      tarp.wxNote = { state: 'ok', n: n, at: clock.local };
+      tarpApplyLive();
+      tarpRepaintOpen();
+    }).catch(function (e) {
+      tarp.wxNote = { state: 'fail', why: String((e && e.message) || e) };
+    }).then(function () {
+      tarp.wxBusy = false;
+      tarpBarRefresh();
+    });
+  }
+  function tarpWxText() {
+    var w = tarp.wxNote, T = state.data && state.data.tarping, r = String((T && T.runAt) || '');
+    var built = r.length >= 16 ? fmtDay(r.slice(0, 10)) + ' ' + clock12(r.slice(11, 16)) : 'last app update';
+    if (!w) return null;
+    if (w.state === 'busy') return 'Weather: getting the latest forecast…';
+    if (w.state === 'ok') {
+      // count what is on screen: a later app build replaces the phone's forecast with its own newer one
+      var n = 0;
+      Object.keys(T.trucks || {}).forEach(function (k) { if (T.trucks[k] && T.trucks[k].live) n++; });
+      return n ? 'Weather: latest forecast ' + clock12(w.at.slice(11, 16)) + ' on this phone (' + n + (n === 1 ? ' truck)' : ' trucks)') : null;
+    }
+    return 'Weather: no new forecast (no signal?) - showing the forecast from ' + built + '. Tap ↻ to try again.';
+  }
+
   // per-truck work in progress (overrides, reason, top-row choice, crew text stamp, last confirm), kept on the phone
   function allDrafts() {
     if (!tarp.drafts) {
@@ -992,11 +1148,21 @@
     try { localStorage.setItem(TARP_DRAFTS, JSON.stringify(tarp.drafts || {})); } catch (e) { /* private mode */ }
   }
   function copyPos(p) { return JSON.parse(JSON.stringify(p || {})); }
-  // a new forecast for the truck (layout, kind or run time changed) drops the old work in progress
+  // A new recommendation for the truck (layout or Preview / Final changed; v19: the phone refreshes the forecast, so
+  // the run time no longer counts): tarps nobody touched follow it, tarps set by hand and their reason stay, the
+  // top-row choice is asked again. The logged decision and the crew-text stamp stay, so the card reads "Logged ...
+  // (changed since)" with Confirm again when the new forecast differs from what was logged.
   function draftFor(t) {
-    var key = t.po + '|' + t.truck, base = [t.layout, t.kind, t.runAt].join('|'), all = allDrafts(), d = all[key];
-    if (!d || d.base !== base) {
+    var key = t.po + '|' + t.truck, base = [t.layout, t.kind].join('|'), all = allDrafts(), d = all[key];
+    if (!d) {
       d = all[key] = { base: base, at: Date.now(), pos: copyPos(TarpingLog.parseLayout(t.layout || '-').positions), reason: '', top: null, crewSent: '', conf: null };
+    } else if (d.base !== base) {
+      var was = String(d.base || '').split('|')[0] || '-', now = t.layout || '-'; // recommendation then / now
+      if (was !== now) {
+        if (TarpingLog.formatLayout(d.pos) === was) { d.pos = copyPos(TarpingLog.parseLayout(now).positions); d.reason = ''; }
+        d.top = null;
+      }
+      d.base = base; d.at = Date.now();
     }
     return d;
   }
@@ -1553,6 +1719,12 @@
     });
     row.appendChild(send); row.appendChild(more);
     bar.appendChild(row);
+    var wn = tarpWxText();
+    if (wn) {
+      var wl = el('div', 'twx' + (tarp.wxNote.state === 'fail' ? ' bad' : ''), wn);
+      wl.id = 'tarp-wx';
+      bar.appendChild(wl);
+    }
     var pn = tarp.panel;
     if (pn) {
       var box = el('div', 'tpanel');

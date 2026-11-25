@@ -286,6 +286,8 @@ a.btn:active { opacity: 0.8; }
 .tbtn.on { background: var(--btn2); color: #fff; }
 .tbtn.quiet { border-color: var(--line); color: var(--muted); }
 .tbtn.danger { border-color: var(--red); color: var(--red); }
+.twx { margin-top: 6px; font-size: .9rem; color: var(--muted); }
+.twx.bad { color: var(--red); font-weight: 600; }
 .tdel-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
 .tdel-t { flex: 1 1 auto; min-width: 0; }
 .tdel-l1 { font-weight: 700; }
